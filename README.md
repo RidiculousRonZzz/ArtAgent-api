@@ -1,4 +1,11 @@
 # ChatGLM-ArtAgent
+```shell
+uvicorn utils:app --reload
+uvicorn utils:app --reload --port 22231 --host 0.0.0.0  默认是8000端口，可以改成别的
+daphne -u /tmp/daphne.sock -p 22231 utils:app
+ionia 开放端口：22231-22300
+http://127.0.0.1:8000/docs 是api文档
+```
 
 ## 介绍
 
