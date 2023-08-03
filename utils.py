@@ -88,11 +88,11 @@ class ChatbotData(BaseModel):
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 # 可以通过 URL /static/image.png 来访问文件
-@app.post("/gpt4_predict")
+@app.post("/gpt4_predict")  # 只有data.history满足gpt-4的api格式，不能污染它
 def gpt4_predict(data: ChatbotData):
     """ input 是 gr.textbox(), history 是 List """
     data.chatbot.append((parse_text(data.input), ""))
-    user_output = construct_user(str(data.input))
+    user_output = construct_user(data.input)
     data.history.append(user_output)
 
     res = gpt4_api(ART_ADVICE, data.history)
@@ -197,26 +197,21 @@ def gpt4_sd_edit(data: ImageRequest):
 
 @app.post("/gpt4_mode_1")  # 第一次实验
 def gpt4_mode_1(data: ChatbotData):
-    context_output = construct_user(str(data.input))
-    data.history.append(context_output)
+    context_output = construct_user(data.input)
 
-    res = gpt4_api(MODE_DECIDE, data.history)  # 输出01向量
+    res = gpt4_api(MODE_DECIDE, [context_output])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
     vector_output = construct_vector(res)
-    data.history.append(vector_output)
     write_json(data.userID, context_output)
     write_json(data.userID, vector_output)
     
-    res2 = TOPIC_INTRO
-    res1 = filter_context(str(data.input), res_vec)  # standard vector
-    data.history.append(construct_context(res1))
+    res1 = filter_context(data.input, res_vec)  # standard vector
     write_json(data.userID, construct_context(res1))
-    res2 = res2 + "1." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n\n"  # 输出1个推荐主题
+    res2 = TOPIC_INTRO + "1." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n\n"  # 输出1个推荐主题
     for i in range(len(res_vec)):  # 5个主题
         new_vector = res_vec.copy()
         new_vector[i] = 1 if new_vector[i] == 0 else 0
-        res1 = filter_context(str(data.input), new_vector)
-        data.history.append(construct_context(res1))
+        res1 = filter_context(data.input, new_vector)
         write_json(data.userID, construct_context(res1))
         res2 = res2 + str(i+2) + "." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n\n"  # 输出1个推荐主题
     
@@ -225,28 +220,24 @@ def gpt4_mode_1(data: ChatbotData):
     write_json(data.userID, topic_output)
     data.chatbot[-1] = (parse_text("Your userID is " + data.userID + ".\n\n" + res2))
 
-    print(data.history)
+    print(data.chatbot)
     return {"chatbot": data.chatbot, "history": data.history}
 
 @app.post("/gpt4_mode_2")  # 第二次实验
 def gpt4_mode_2(data: ChatbotData):
-    data.history.append(construct_user(str(data.input)))
-    write_json(data.userID, construct_user(str(data.input)))
-
-    res = gpt4_api(MODE_DECIDE, data.history)  # 输出01向量
+    res = gpt4_api(MODE_DECIDE, construct_user(data.input))  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
-    data.history.append(construct_vector(str(res_vec)))
+    write_json(data.userID, construct_user(data.input))
     write_json(data.userID, construct_vector(str(res_vec)))
 
-    res1 = filter_context(str(data.input), res_vec)  # 输出有用的模态信息
-    data.history.append(construct_context(res1))
+    res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
     write_json(data.userID, construct_context(res1))
     res2 = gpt4_api(TOPIC_RECOMMEND_2, [construct_user(res1)])  # 输出2个推荐主题
 
-    vec_random = flip_random_bit(res_vec)
-    res_random1 = filter_context(str(data.input), vec_random)
+    vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
+    res_random1 = filter_context(data.input, vec_random)
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
-    topic_output = construct_assistant(TOPIC_INTRO + res2 + "\n\n" + res_random2)
+    topic_output = construct_assistant(TOPIC_INTRO + res2 + "\n\n3. " + res_random2)
     data.history.append(topic_output)
     write_json(data.userID, topic_output)
     data.chatbot[-1] = (parse_text("Your userID is " + data.userID + ".\n\n" + TOPIC_INTRO + res2 + "\n\n3. " + res_random2))
@@ -256,23 +247,19 @@ def gpt4_mode_2(data: ChatbotData):
 
 @app.post("/gpt4_mode_3")  # 第三次实验
 def gpt4_mode_3(data: ChatbotData):
-    data.history.append(construct_user(str(data.input)))
-    write_json(data.userID, construct_user(str(data.input)))
-
-    res = gpt4_api(MODE_DECIDE, data.history)  # 输出01向量
+    res = gpt4_api(MODE_DECIDE, construct_user(data.input))  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
-    data.history.append(construct_vector(str(res_vec)))
+    write_json(data.userID, construct_user(data.input))
     write_json(data.userID, construct_vector(str(res_vec)))
 
-    res1 = filter_context(str(data.input), res_vec)  # 输出有用的模态信息
-    data.history.append(construct_context(res1))
+    res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
     write_json(data.userID, construct_context(res1))
     res2 = gpt4_api(TOPIC_RECOMMEND_2, [construct_user(res1)])  # 输出2个推荐主题
 
-    vec_random = flip_random_bit(res_vec)
-    res_random1 = filter_context(str(data.input), vec_random)  # 该处的随机概率待定
+    vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse，概率待定
+    res_random1 = filter_context(data.input, vec_random)
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
-    topic_output = construct_assistant(TOPIC_INTRO + res2 + "\n\n" + res_random2)
+    topic_output = construct_assistant(TOPIC_INTRO + res2 + "\n\n3. " + res_random2)
     data.history.append(topic_output)
     write_json(data.userID, topic_output)
     data.chatbot[-1] = (parse_text("Your userID is " + data.userID + ".\n\n" + TOPIC_INTRO + res2 + "\n\n3. " + res_random2))
