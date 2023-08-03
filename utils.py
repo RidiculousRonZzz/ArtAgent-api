@@ -138,11 +138,11 @@ def gpt4_sd_draw(data: ImageRequest):
     new_image = new_images[0]
     new_image.save(os.path.join(image_path))  # 暂时存成edit.png
     static_path = "static/images/" + str(uuid.uuid4()) + ".png"
-    print("图片链接 http://166.111.139.118:22231/" + static_path)
+    print("图片链接 http://166.111.139.116:22231/" + static_path)
     # print("图片链接 http://localhost:8000/" + static_path)
     new_image.save(static_path)
     # 构造URL
-    image_url = "http://166.111.139.118:22231/" + static_path
+    image_url = "http://166.111.139.116:22231/" + static_path
 
     if data.cnt > 0:
         data.chatbot.append((parse_text("This image doesn't align with my vision, please revise the description."), parse_text("My apologies, I will amend the description and generate a new image.")))
@@ -186,11 +186,11 @@ def gpt4_sd_edit(data: ImageRequest):
         new_image = new_images[0]
         new_image.save(os.path.join(image_path))  # 暂时存成edit.png
         static_path = "static/images/" + str(uuid.uuid4()) + ".png"
-        print("图片链接 http://166.111.139.118:22231/" + static_path)
+        print("图片链接 http://166.111.139.116:22231/" + static_path)
         # print("图片链接 http://localhost:8000/" + static_path)
         new_image.save(static_path)
         # 构造URL
-        image_url = "http://166.111.139.118:22231/" + static_path
+        image_url = "http://166.111.139.116:22231/" + static_path
 
     return {"chatbot": data.chatbot, "history": data.history, "image_url": str(image_url), "cnt": data.cnt}
 

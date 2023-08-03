@@ -11,7 +11,7 @@ data = {
 
 try:
     response = requests.post(
-        "http://166.111.139.118:22231/gpt4_predict", 
+        "http://166.111.139.116:22231/gpt4_predict", 
         data=json.dumps(data),  
         headers={'Content-Type':'application/json'}, 
         timeout=900  # 设置超时时间，例如30秒
