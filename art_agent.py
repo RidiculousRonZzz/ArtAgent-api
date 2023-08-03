@@ -37,7 +37,7 @@ with gr.Blocks(title="ArtAgent ChatBot") as demo:
 
     history = gr.State([])
     result_list = gr.State([])
-    userID = gr.State(random.randint(0, 9999999))  # 用户在未刷新情况下随机给到一个id
+    userID = gr.State(random.randint(0, 9999999999))  # 用户在未刷新情况下随机给到一个id
     cnt = gr.State(0)
 
     def click_count():
