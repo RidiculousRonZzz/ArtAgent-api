@@ -26,8 +26,8 @@ CN_TXT2IMG_PROMPT = "You are to receive an art discussion between a user and an 
 TXT2IMG_NEG_PROMPT = "You are provided with an art discussion between user and artist. If the user mentions the people, objects, scenes, or styles they wish to paint, summarize the antonyms of what they want to paint into ENGLISH keywords, not exceeding 6 words. If the user does not specify what they don't want to paint, reply with a space. For instance, if the user doesn't want to paint nighttime, your response should be 'night scene'; if the user wants to paint nighttime, your response should be 'daytime'. DON'T USE quotation marks, and don't start with words like 'create' or 'paint'"
 TXT2IMG_PROMPT = "Give you art discussions between the user and the artist. If the user believes the artist's description of the image is incorrect, you should comply with the user's request. Place the painting theme chosen by the user at the beginning and write ENGLISH prompt for the text-to-image model to draw a picture, within 50 words. Note that if the description is relatively long, you need to extract the main imagery and scenes; if short, make sure to emphasize the subject of the painting, employ your imagination, and add some content to enrich the details. DON'T add quotation marks, and DON'T begin with words like 'create' or 'paint', just directly describe the scene."
 TRANSLATE = "Translate this Chinese text into English."
-TOPIC_RECOMMEND_1 = "You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
-TOPIC_RECOMMEND_2 = "You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
+TOPIC_RECOMMEND_1 = "Answer format example: [painting theme here, don't need to use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
+TOPIC_RECOMMEND_2 = "Answer format example: 1.[painting theme 1 here, don't need to use brackets[]]\n\n2.[painting theme 2 here, don't need to use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
 TOPIC_INTRO = "Based on your painting instruction and context, I recommend the following 3 painting themes. Please CHOOSE ONE to proceed with your creation. If you have a better suggestion, please share it.\n\n"
 MODE_DECIDE = """I will give you information on the user in 6 modalities: Location, Phone Content, Facial Expression, Weather, Music, User Command. There are 8 main scenarios for user AI painting, please judge the user's scenario and output a 5-dimensional vector, where each coordinate is represented by 0 or 1. You should directly respond with the VALUE of the VECTOR, NO EXPLANATION NEEDED, like '[0,0,0,0,0]'.
 Scenario 1 (Normal Mode): vector=[0,0,0,0,0].
@@ -218,36 +218,45 @@ def gpt4_mode_1(data: ChatbotData):
     topic_output = construct_assistant(res2)
     data.history.append(topic_output)
     write_json(data.userID, topic_output)
-    data.chatbot[-1] = (parse_text("Your userID is " + data.userID + ".\n\n" + res2))
+    data.chatbot.append(parse_text("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2))
 
     print(data.chatbot)
     return {"chatbot": data.chatbot, "history": data.history}
 
 @app.post("/gpt4_mode_2")  # 第二次实验
 def gpt4_mode_2(data: ChatbotData):
-    res = gpt4_api(MODE_DECIDE, construct_user(data.input))  # 输出01向量
+    print(data.input)
+    res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
+    print(res)
     res_vec = extract_lists(res)  # 正则表达式提取出列表
+    print(res_vec)
     write_json(data.userID, construct_user(data.input))
     write_json(data.userID, construct_vector(str(res_vec)))
 
     res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
+    print(res1)
     write_json(data.userID, construct_context(res1))
     res2 = gpt4_api(TOPIC_RECOMMEND_2, [construct_user(res1)])  # 输出2个推荐主题
+    print(res2)
 
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
     res_random1 = filter_context(data.input, vec_random)
+    print(vec_random)
+    write_json(data.userID, construct_vector(str(vec_random)))
+    print(res_random1)
+    write_json(data.userID, construct_vector(str(res_random1)))
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
     topic_output = construct_assistant(TOPIC_INTRO + res2 + "\n\n3. " + res_random2)
     data.history.append(topic_output)
     write_json(data.userID, topic_output)
-    data.chatbot[-1] = (parse_text("Your userID is " + data.userID + ".\n\n" + TOPIC_INTRO + res2 + "\n\n3. " + res_random2))
+    data.chatbot.append(parse_text("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n\n3. " + res_random2))
 
-    print(data.history)
+    print(data.chatbot)
     return {"chatbot": data.chatbot, "history": data.history}
 
 @app.post("/gpt4_mode_3")  # 第三次实验
 def gpt4_mode_3(data: ChatbotData):
-    res = gpt4_api(MODE_DECIDE, construct_user(data.input))  # 输出01向量
+    res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
     write_json(data.userID, construct_user(data.input))
     write_json(data.userID, construct_vector(str(res_vec)))
@@ -262,7 +271,7 @@ def gpt4_mode_3(data: ChatbotData):
     topic_output = construct_assistant(TOPIC_INTRO + res2 + "\n\n3. " + res_random2)
     data.history.append(topic_output)
     write_json(data.userID, topic_output)
-    data.chatbot[-1] = (parse_text("Your userID is " + data.userID + ".\n\n" + TOPIC_INTRO + res2 + "\n\n3. " + res_random2))
+    data.chatbot.append(parse_text("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n\n3. " + res_random2))
 
     print(data.history)
     return {"chatbot": data.chatbot, "history": data.history}
