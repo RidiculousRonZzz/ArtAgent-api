@@ -27,7 +27,7 @@ TXT2IMG_NEG_PROMPT = "You are provided with an art discussion between user and a
 TXT2IMG_PROMPT = "Give you art discussions between the user and the artist. If the user believes the artist's description of the image is incorrect, you should comply with the user's request. Place the painting theme chosen by the user at the beginning and write ENGLISH prompt for the text-to-image model to draw a picture, within 50 words. Note that if the description is relatively long, you need to extract the main imagery and scenes; if short, make sure to emphasize the subject of the painting, employ your imagination, and add some content to enrich the details. DON'T add quotation marks, and DON'T begin with words like 'create' or 'paint', just directly describe the scene."
 TRANSLATE = "Translate this Chinese text into English."
 TOPIC_RECOMMEND_1 = "Answer format example: [painting theme here, don't need to use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
-TOPIC_RECOMMEND_2 = "Answer format example: 1.[painting theme 1 here, don't need to use brackets[]]\n\n2.[painting theme 2 here, don't need to use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
+TOPIC_RECOMMEND_2 = "Answer format example: 1.[painting theme 1 here, don't need to use brackets[]]\n2.[painting theme 2 here, don't need to use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
 TOPIC_INTRO = "Based on your painting instruction and context, I recommend the following 3 painting themes. Please CHOOSE ONE to proceed with your creation. If you have a better suggestion, please share it.\n\n"
 MODE_DECIDE = """I will give you information on the user in 6 modalities: Location, Phone Content, Facial Expression, Weather, Music, User Command. There are 8 main scenarios for user AI painting, please judge the user's scenario and output a 5-dimensional vector, where each coordinate is represented by 0 or 1. You should directly respond with the VALUE of the VECTOR, NO EXPLANATION NEEDED, like '[0,0,0,0,0]'.
 Scenario 1 (Normal Mode): vector=[0,0,0,0,0].
@@ -81,7 +81,6 @@ def write_json(userID, output):
 
 class ChatbotData(BaseModel):
     input: str
-    chatbot: List[str]
     history: List[str]
     userID: int
 
@@ -91,7 +90,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.post("/gpt4_predict")  # 只有data.history满足gpt-4的api格式，不能污染它
 def gpt4_predict(data: ChatbotData):
     """ input 是 gr.textbox(), history 是 List """
-    data.chatbot.append((parse_text(data.input), ""))
     user_output = construct_user(data.input)
     data.history.append(user_output)
 
@@ -102,9 +100,8 @@ def gpt4_predict(data: ChatbotData):
     write_json(data.userID, user_output)
     write_json(data.userID, assistant_output)
     print(data.history)
-    data.chatbot[-1] = (parse_text(data.input), parse_text(res))
     
-    return {"chatbot": data.chatbot, "history": data.history}
+    return {"history": data.history}
 
 # uvicorn utils:app --reload
 # uvicorn utils:app --reload --port 22231 --host 0.0.0.0  默认是8000端口，可以改成别的
@@ -118,7 +115,6 @@ class HistoryItem(BaseModel):
     content: str
 
 class ImageRequest(BaseModel):
-    chatbot: List[List[str]]
     history: List[Dict[str, str]]
     userID: int
     cnt: int
@@ -145,30 +141,26 @@ def gpt4_sd_draw(data: ImageRequest):
     image_url = "http://166.111.139.116:22231/" + static_path
 
     if data.cnt > 0:
-        data.chatbot.append((parse_text("This image doesn't align with my vision, please revise the description."), parse_text("My apologies, I will amend the description and generate a new image.")))
         data.history.append(construct_user("This image doesn't align with my vision, please revise the description."))
         data.history.append(construct_assistant("My apologies, I will amend the description and generate a new image."))
         write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."))
         write_json(data.userID, construct_assistant("My apologies, I will amend the description and generate a new image."))
     data.cnt = data.cnt + 1
 
-    data.chatbot.append((parse_text("Please generate an image based on our previous art discussion."), ""))
     response = "Complete.\n\n" + gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
 
-    data.chatbot[-1] = (parse_text("Please generate an image based on our previous art discussion."), parse_text(response)) 
     data.history.append(construct_user("Please generate an image based on our previous art discussion."))
     data.history.append(construct_assistant(response))
     write_json(data.userID, construct_user("Please generate an image based on our previous art discussion."))
     write_json(data.userID, construct_assistant(response))
     print(data.history)
 
-    return {"chatbot": data.chatbot, "history": data.history, "image_url": str(image_url), "cnt": str(data.cnt)}
+    return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
 
 
 @app.post("/gpt4_sd_edit")  # 但是要让手机端发图片
 def gpt4_sd_edit(data: ImageRequest):
     if data.cnt > 0:
-        data.chatbot.append((parse_text("This image doesn't align with my vision, please revise the description."), parse_text("My apologies, I will amend the description and generate a new image.")))
         data.history.append(construct_user("This image doesn't align with my vision, please revise the description."))
         data.history.append(construct_assistant("My apologies, I will amend the description and generate a new image."))
         write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."))
@@ -192,7 +184,7 @@ def gpt4_sd_edit(data: ImageRequest):
         # 构造URL
         image_url = "http://166.111.139.116:22231/" + static_path
 
-    return {"chatbot": data.chatbot, "history": data.history, "image_url": str(image_url), "cnt": data.cnt}
+    return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
 
 
 @app.post("/gpt4_mode_1")  # 第一次实验
@@ -207,21 +199,20 @@ def gpt4_mode_1(data: ChatbotData):
     
     res1 = filter_context(data.input, res_vec)  # standard vector
     write_json(data.userID, construct_context(res1))
-    res2 = TOPIC_INTRO + "1." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n\n"  # 输出1个推荐主题
+    res2 = "Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + "1." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n"  # 输出1个推荐主题
     for i in range(len(res_vec)):  # 5个主题
         new_vector = res_vec.copy()
         new_vector[i] = 1 if new_vector[i] == 0 else 0
         res1 = filter_context(data.input, new_vector)
         write_json(data.userID, construct_context(res1))
-        res2 = res2 + str(i+2) + "." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n\n"  # 输出1个推荐主题
+        res2 = res2 + str(i+2) + "." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n"  # 输出1个推荐主题
     
     topic_output = construct_assistant(res2)
     data.history.append(topic_output)
     write_json(data.userID, topic_output)
-    data.chatbot.append(parse_text("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2))
 
-    print(data.chatbot)
-    return {"chatbot": data.chatbot, "history": data.history}
+    print(data.history)
+    return {"history": data.history}
 
 @app.post("/gpt4_mode_2")  # 第二次实验
 def gpt4_mode_2(data: ChatbotData):
@@ -246,35 +237,42 @@ def gpt4_mode_2(data: ChatbotData):
     print(res_random1)
     write_json(data.userID, construct_vector(str(res_random1)))
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
-    topic_output = construct_assistant(TOPIC_INTRO + res2 + "\n\n3. " + res_random2)
+    topic_output = construct_assistant("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     data.history.append(topic_output)
     write_json(data.userID, topic_output)
-    data.chatbot.append(parse_text("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n\n3. " + res_random2))
 
-    print(data.chatbot)
-    return {"chatbot": data.chatbot, "history": data.history}
+    print(data.history)
+    return {"history": data.history}
 
 @app.post("/gpt4_mode_3")  # 第三次实验
 def gpt4_mode_3(data: ChatbotData):
+    print(data.input)
     res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
+    print(res)
     res_vec = extract_lists(res)  # 正则表达式提取出列表
+    print(res_vec)
     write_json(data.userID, construct_user(data.input))
     write_json(data.userID, construct_vector(str(res_vec)))
 
     res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
+    print(res1)
     write_json(data.userID, construct_context(res1))
     res2 = gpt4_api(TOPIC_RECOMMEND_2, [construct_user(res1)])  # 输出2个推荐主题
+    print(res2)
 
-    vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse，概率待定
+    vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
     res_random1 = filter_context(data.input, vec_random)
+    print(vec_random)
+    write_json(data.userID, construct_vector(str(vec_random)))
+    print(res_random1)
+    write_json(data.userID, construct_vector(str(res_random1)))
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
-    topic_output = construct_assistant(TOPIC_INTRO + res2 + "\n\n3. " + res_random2)
+    topic_output = construct_assistant("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     data.history.append(topic_output)
     write_json(data.userID, topic_output)
-    data.chatbot.append(parse_text("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n\n3. " + res_random2))
 
     print(data.history)
-    return {"chatbot": data.chatbot, "history": data.history}
+    return {"history": data.history}
 
 
 def construct_text(role, text):
