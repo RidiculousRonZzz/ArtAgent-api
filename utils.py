@@ -19,6 +19,9 @@ from typing import List, Dict
 import uuid
 import re
 import ast
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
 
 ART_ADVICE = "You are a professional art critic. If a user asks for your advice, provide a painting description for inspiration based on the previous chat record, starting with 'You could paint this picture like this', be imaginative, and LIMIT IT TO 130 WORDS without offering multiple scenarios; if the user suggests their own drawing idea, give a concise response to show agreement. DON'T SAY 'I lack the capability to generate images'. If the user uses Chinese, please reply in Chinese."
 UPLOAD_ADVICE = "You are a professional art critic. Upon receiving a textual description of an image, you should first respond with 'Received', followed by a separate paragraph restating this textual description. Then, in another separate paragraph, based on the received text description, it would be best to provide professional and imaginative improvement suggestions, primarily considering adding, reducing, or altering objects in the background or changing the painting style. Avoid giving advice on contrast and depth of field. DON'T SAY 'From your description, you mentioned in the picture', but rather use phrases similar to 'Based on the image you uploaded'. Make the user believe that the image is understood by you. ATTENTION: If the user uses Chinese, please reply in Chinese."
@@ -81,7 +84,7 @@ def write_json(userID, output):
 
 class ChatbotData(BaseModel):
     input: str
-    history: List[str]
+    history: List[Dict[str, str]]
     userID: int
 
 app = FastAPI()
@@ -89,7 +92,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # 可以通过 URL /static/image.png 来访问文件
 @app.post("/gpt4_predict")  # 只有data.history满足gpt-4的api格式，不能污染它
 def gpt4_predict(data: ChatbotData):
-    """ input 是 gr.textbox(), history 是 List """
     user_output = construct_user(data.input)
     data.history.append(user_output)
 
@@ -104,7 +106,7 @@ def gpt4_predict(data: ChatbotData):
     return {"history": data.history}
 
 # uvicorn utils:app --reload
-# uvicorn utils:app --reload --port 22231 --host 0.0.0.0  默认是8000端口，可以改成别的
+# uvicorn utils:app --reload --port 22231 --host 0.0.0.0 --timeout-keep-alive 600 --ws-ping-timeout 600  默认是8000端口，可以改成别的，设置超时为10分钟
 # daphne -u /tmp/daphne.sock -p 22231 utils:app
 # ionia 开放端口：22231-22300
 # http://127.0.0.1:8000/docs 是api文档
@@ -123,6 +125,8 @@ class ImageRequest(BaseModel):
 
 @app.post("/gpt4_sd_draw")
 def gpt4_sd_draw(data: ImageRequest):
+    logging.debug('gpt4_sd_draw called with data: %s', data)
+
     image_path = "output/edit-" + str(data.userID) + ".png"
     pos_prompt = gpt4_api(TXT2IMG_PROMPT, data.history)
     print(f"pos_prompt: {pos_prompt}")
@@ -149,12 +153,10 @@ def gpt4_sd_draw(data: ImageRequest):
 
     response = "Complete.\n\n" + gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
 
-    data.history.append(construct_user("Please generate an image based on our previous art discussion."))
     data.history.append(construct_assistant(response))
     write_json(data.userID, construct_user("Please generate an image based on our previous art discussion."))
     write_json(data.userID, construct_assistant(response))
-    print(data.history)
-
+    logging.debug('gpt4_sd_draw finished with history: %s, image_url: %s, cnt: %s', data.history, image_url, data.cnt)
     return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
 
 
