@@ -1,5 +1,7 @@
 # ChatGLM-ArtAgent
 ```shell
+(base) dlenv@ionia:~$ tmux attach-session -t fxz-aa-api
+/data2/dlenv/fxz/ChatGLM-ArtAgent-api
 uvicorn utils:app --reload
 uvicorn utils:app --reload --port 22231 --host 0.0.0.0  默认是8000端口，可以改成别的
 daphne -u /tmp/daphne.sock -p 22231 utils:app
