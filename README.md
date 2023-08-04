@@ -1,5 +1,6 @@
 # ChatGLM-ArtAgent
 ```shell
+api都在util.py中
 166.111.139.116
 (base) dlenv@ionia:~$ tmux attach-session -t fxz-aa-api
 /data2/dlenv/fxz/ChatGLM-ArtAgent-api
