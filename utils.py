@@ -128,10 +128,16 @@ def gpt4_sd_draw(data: ImageRequest):
     logging.debug('gpt4_sd_draw called with data: %s', data)
 
     image_path = "output/edit-" + str(data.userID) + ".png"
+
+    tmp_history = data.history
+    if len(data.history) > 0:  # 去掉绘画指令那一句
+        data.history.pop()
     pos_prompt = gpt4_api(TXT2IMG_PROMPT, data.history)
     print(f"pos_prompt: {pos_prompt}")
     neg_prompt = gpt4_api(TXT2IMG_NEG_PROMPT, data.history)
     print(f"neg_prompt: {neg_prompt}")
+    data.history = tmp_history
+    
     write_json(data.userID, construct_prompt(pos_prompt + "\n" + neg_prompt))
     new_images = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height)
     
