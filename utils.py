@@ -21,7 +21,7 @@ import re
 import ast
 
 
-ART_ADVICE = "You are a professional art critic. If a user asks for your advice, provide a painting description for inspiration based on the previous chat record, starting with 'You could paint this picture like this', be imaginative, and LIMIT IT TO 130 WORDS without offering multiple scenarios; if the user suggests their own drawing idea, give a concise response to show agreement. DON'T SAY 'I lack the capability to generate images'. If the user uses Chinese, please reply in Chinese."
+ART_ADVICE = "You are a professional art critic. If a user asks for your advice, provide a painting description for inspiration based on the previous chat record, starting with 'You could paint this picture like this', be imaginative, and LIMIT IT TO 120 WORDS without offering multiple scenarios; if the user suggests their own drawing idea, give a concise response to show agreement. DON'T SAY 'I lack the capability to generate images'. If the user uses Chinese, please reply in Chinese."
 UPLOAD_ADVICE = "You are a professional art critic. Upon receiving a textual description of an image, you should first respond with 'Received', followed by a separate paragraph restating this textual description. Then, in another separate paragraph, based on the received text description, it would be best to provide professional and imaginative improvement suggestions, primarily considering adding, reducing, or altering objects in the background or changing the painting style. Avoid giving advice on contrast and depth of field. DON'T SAY 'From your description, you mentioned in the picture', but rather use phrases similar to 'Based on the image you uploaded'. Make the user believe that the image is understood by you. ATTENTION: If the user uses Chinese, please reply in Chinese."
 CN_TXT2IMG_PROMPT = "You are to receive an art discussion between a user and an artist. Analyze the final outcome of the discussion and based on adding, removing, or changing objects in the background or altering the painting style, summarize the key words for the direction of image improvement after the art discussion. Start with the key elements of the original image as an ENGLISH prompt for the text-to-image model. The prompt should not exceed 25 words and should not contain words like 'high contrast'. When replying, write only ENGLISH prompt and DON'T USE quotation marks."
 TXT2IMG_NEG_PROMPT = "You are provided with an art discussion between user and artist. If the user mentions the people, objects, scenes, or styles they wish to paint, summarize the antonyms of what they want to paint into ENGLISH keywords, not exceeding 6 words. If the user does not specify what they don't want to paint, reply with a space. For instance, if the user doesn't want to paint nighttime, your response should be 'night scene'; if the user wants to paint nighttime, your response should be 'daytime'. DON'T USE quotation marks, and don't start with words like 'create' or 'paint'"
@@ -140,7 +140,7 @@ def gpt4_sd_draw(data: ImageRequest):
         write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."), construct_assistant("My apologies, I will amend the description and generate a new image."))
     data.cnt = data.cnt + 1
 
-    response = "Complete.\n\n" + gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
+    response = "Complete.\n\n" + turbo_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
 
     data.history.append(construct_assistant(response))
     write_json(data.userID, construct_prompt(pos_prompt + "\n" + neg_prompt), construct_user("Please generate an image based on our previous art discussion."), construct_assistant(response))
@@ -329,6 +329,22 @@ def gpt4_api(system, history):
         return None
 
 
+def turbo_api(system, history):
+    """ 返回str，参数为str,List """
+    api_key = os.getenv('OPENAI_API_KEY')
+    openai.api_key = api_key
+
+    try:
+        response = openai.ChatCompletion.create(model="gpt-3.5-turbo-16k-0613", messages=[construct_system(system), *history])
+        return response['choices'][0]['message']['content']
+    except openai.error.ServiceUnavailableError:
+        print('The server is overloaded or not ready yet. Please try again later.')
+        return None
+    except Exception as e:
+        print(f'Unexpected error occurred: {e}')
+        return None
+    
+
 def reset_user_input():
     return gr.update(value='')
 
@@ -503,8 +519,6 @@ def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height, user_input=""):
         "height": height,
     }
     response = requests.post(url=f'{url}/sdapi/v1/txt2img', json=payload)
-    print(payload["width"])
-    print(payload["height"])
     r = response.json()
     image_list = []
     os.makedirs('output', exist_ok=True)
