@@ -12,15 +12,13 @@ import base64
 import cv2
 import openai
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict
 import uuid
 import re
 import ast
-import logging
-logging.basicConfig(level=logging.DEBUG)
 
 
 ART_ADVICE = "You are a professional art critic. If a user asks for your advice, provide a painting description for inspiration based on the previous chat record, starting with 'You could paint this picture like this', be imaginative, and LIMIT IT TO 130 WORDS without offering multiple scenarios; if the user suggests their own drawing idea, give a concise response to show agreement. DON'T SAY 'I lack the capability to generate images'. If the user uses Chinese, please reply in Chinese."
@@ -29,8 +27,10 @@ CN_TXT2IMG_PROMPT = "You are to receive an art discussion between a user and an 
 TXT2IMG_NEG_PROMPT = "You are provided with an art discussion between user and artist. If the user mentions the people, objects, scenes, or styles they wish to paint, summarize the antonyms of what they want to paint into ENGLISH keywords, not exceeding 6 words. If the user does not specify what they don't want to paint, reply with a space. For instance, if the user doesn't want to paint nighttime, your response should be 'night scene'; if the user wants to paint nighttime, your response should be 'daytime'. DON'T USE quotation marks, and don't start with words like 'create' or 'paint'"
 TXT2IMG_PROMPT = "Give you art discussions between the user and the artist. If the user believes the artist's description of the image is incorrect, you should comply with the user's request. Place the painting theme chosen by the user at the beginning and write ENGLISH prompt for the text-to-image model to draw a picture, within 50 words. Note that if the description is relatively long, you need to extract the main imagery and scenes; if short, make sure to emphasize the subject of the painting, employ your imagination, and add some content to enrich the details. DON'T add quotation marks, and DON'T begin with words like 'create' or 'paint', just directly describe the scene."
 TRANSLATE = "Translate this Chinese text into English."
-TOPIC_RECOMMEND_1 = "Answer format example: [painting theme here, don't need to use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
-TOPIC_RECOMMEND_2 = "Answer format example: 1.[painting theme 1 here, don't need to use brackets[]]\n2.[painting theme 2 here, don't need to use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
+TOPIC_RECOMMEND_1 = "Answer format example:[painting theme here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
+TOPIC_RECOMMEND_2 = "Answer format example:1.[painting theme 1 here, don't use brackets[]]\n2.[painting theme 2 here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
+EDIT_TOPIC_1 = "Answer format example:[theme here, don't use brackets[]]. You are an imaginative artist. Analyze the most probable intent of the user to modify the painting, considering additions, reductions, or alterations of background objects or style changes, excluding contrast and depth advice. Provide 1 editing theme within a 15-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
+EDIT_TOPIC_2 = "Answer format example:1.[theme 1 here, don't use brackets[]]\n2.[theme 2 here, don't use brackets[]]. Analyze the most probable intent of the user to modify the painting, considering additions, reductions, or alterations of background objects or style changes, excluding contrast and depth advice. Provide 2 editing themes, each theme within a 15-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
 TOPIC_INTRO = "Based on your painting instruction and context, I recommend the following 3 painting themes. Please CHOOSE ONE to proceed with your creation. If you have a better suggestion, please share it.\n\n"
 MODE_DECIDE = """I will give you information on the user in 6 modalities: Location, Phone Content, Facial Expression, Weather, Music, User Command. There are 8 main scenarios for user AI painting, please judge the user's scenario and output a 5-dimensional vector, where each coordinate is represented by 0 or 1. You should directly respond with the VALUE of the VECTOR, NO EXPLANATION NEEDED, like '[0,0,0,0,0]'.
 Scenario 1 (Normal Mode): vector=[0,0,0,0,0].
@@ -76,10 +76,11 @@ def flip_random_bit(vector):
     vector_copy[index] = 1 - vector_copy[index]
     return vector_copy
 
-def write_json(userID, output):
+def write_json(userID, *args):
     with open('output/' + str(userID) + '.json', 'a', encoding='utf-8') as f:
-        json.dump(output, f, ensure_ascii=False)  # False，可保存utf-8编码
-        f.write('\n')
+        for arg in args:
+            json.dump(arg, f, ensure_ascii=False)  # False，可保存utf-8编码
+            f.write('\n')
 
 
 class ChatbotData(BaseModel):
@@ -92,17 +93,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # 可以通过 URL /static/image.png 来访问文件
 @app.post("/gpt4_predict")  # 只有data.history满足gpt-4的api格式，不能污染它
 def gpt4_predict(data: ChatbotData):
-    user_output = construct_user(data.input)
-    data.history.append(user_output)
-
     res = gpt4_api(ART_ADVICE, data.history)
     assistant_output = construct_assistant(res)
     data.history.append(assistant_output)
 
-    write_json(data.userID, user_output)
-    write_json(data.userID, assistant_output)
+    write_json(data.userID, construct_user(data.input), assistant_output)
     print(data.history)
-    
     return {"history": data.history}
 
 # uvicorn utils:app --reload
@@ -110,11 +106,6 @@ def gpt4_predict(data: ChatbotData):
 # daphne -u /tmp/daphne.sock -p 22231 utils:app
 # ionia 开放端口：22231-22300
 # http://127.0.0.1:8000/docs 是api文档
-
-
-class HistoryItem(BaseModel):
-    role: str
-    content: str
 
 class ImageRequest(BaseModel):
     history: List[Dict[str, str]]
@@ -125,9 +116,75 @@ class ImageRequest(BaseModel):
 
 @app.post("/gpt4_sd_draw")
 def gpt4_sd_draw(data: ImageRequest):
-    logging.debug('gpt4_sd_draw called with data: %s', data)
+    tmp_history = data.history
+    if len(data.history) > 0:  # 去掉绘画指令那一句
+        data.history.pop()
+    pos_prompt = gpt4_api(TXT2IMG_PROMPT, data.history)
+    print(f"pos_prompt: {pos_prompt}")
+    neg_prompt = gpt4_api(TXT2IMG_NEG_PROMPT, data.history)
+    print(f"neg_prompt: {neg_prompt}")
+    data.history = tmp_history
+    new_images = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height)
+    
+    new_image = new_images[0]
+    static_path = "static/images/" + str(uuid.uuid4()) + ".png"
+    print("图片链接 http://166.111.139.116:22231/" + static_path)
+    # print("图片链接 http://localhost:8000/" + static_path)
+    new_image.save(static_path)
+    # 构造URL
+    image_url = "http://166.111.139.116:22231/" + static_path
 
-    image_path = "output/edit-" + str(data.userID) + ".png"
+    if data.cnt > 0:
+        data.history.append(construct_user("This image doesn't align with my vision, please revise the description."))
+        data.history.append(construct_assistant("My apologies, I will amend the description and generate a new image."))
+        write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."), construct_assistant("My apologies, I will amend the description and generate a new image."))
+    data.cnt = data.cnt + 1
+
+    response = "Complete.\n\n" + gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
+
+    data.history.append(construct_assistant(response))
+    write_json(data.userID, construct_prompt(pos_prompt + "\n" + neg_prompt), construct_user("Please generate an image based on our previous art discussion."), construct_assistant(response))
+    print(data.history)
+    return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
+
+class ImageEdit(BaseModel):
+    input: str
+    history: List[Dict[str, str]]
+    userID: int
+    width: int
+    height: int
+    image: UploadFile = File(...)
+
+@app.post("/image_edit_topic")  # 只给评价和推荐
+def gpt4_sd_edit(data: ImageEdit):
+    image_bytes = data.image.file.read()
+    image = Image.open(io.BytesIO(image_bytes))
+    img = np.array(image)
+    process_and_save_image(img, data.userID)
+
+    image_description = gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(img))["result"]])
+
+    res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
+    res_vec = extract_lists(res)  # 正则表达式提取出列表
+    res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
+    res2 = gpt4_api(EDIT_TOPIC_2, [construct_user(f"{res1},image:[{image_description}]")])  # 输出2个推荐主题
+
+    vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
+    res_random1 = filter_context(data.input, vec_random)
+    res_random2 = gpt4_api(EDIT_TOPIC_1, [construct_user(f"{res_random1},image:[{image_description}]")])
+    topic_output = construct_assistant("Received.\nYour userID is " + str(data.userID) + ".\n\n" + image_description + "\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
+    data.history.append(topic_output)
+    write_json(data.userID, construct_user(data.input), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
+
+    print(data.history)
+    return {"history": data.history}
+
+@app.post("/gpt4_sd_edit")  # 还没写完!!!
+def gpt4_sd_edit(data: ImageEdit):  # 根据讨论修改图片
+    image_bytes = data.image.file.read()
+    image = Image.open(io.BytesIO(image_bytes))
+    img = np.array(image)
+    process_and_save_image(img, data.userID)
 
     tmp_history = data.history
     if len(data.history) > 0:  # 去掉绘画指令那一句
@@ -137,12 +194,11 @@ def gpt4_sd_draw(data: ImageRequest):
     neg_prompt = gpt4_api(TXT2IMG_NEG_PROMPT, data.history)
     print(f"neg_prompt: {neg_prompt}")
     data.history = tmp_history
-    
+
     write_json(data.userID, construct_prompt(pos_prompt + "\n" + neg_prompt))
     new_images = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height)
     
     new_image = new_images[0]
-    new_image.save(os.path.join(image_path))  # 暂时存成edit.png
     static_path = "static/images/" + str(uuid.uuid4()) + ".png"
     print("图片链接 http://166.111.139.116:22231/" + static_path)
     # print("图片链接 http://localhost:8000/" + static_path)
@@ -162,36 +218,7 @@ def gpt4_sd_draw(data: ImageRequest):
     data.history.append(construct_assistant(response))
     write_json(data.userID, construct_user("Please generate an image based on our previous art discussion."))
     write_json(data.userID, construct_assistant(response))
-    logging.debug('gpt4_sd_draw finished with history: %s, image_url: %s, cnt: %s', data.history, image_url, data.cnt)
-    return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
-
-
-@app.post("/gpt4_sd_edit")  # 但是要让手机端发图片
-def gpt4_sd_edit(data: ImageRequest):
-    if data.cnt > 0:
-        data.history.append(construct_user("This image doesn't align with my vision, please revise the description."))
-        data.history.append(construct_assistant("My apologies, I will amend the description and generate a new image."))
-        write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."))
-        write_json(data.userID, construct_assistant("My apologies, I will amend the description and generate a new image."))
-    data.cnt = data.cnt + 1
-
-    image_path = "output/edit-" + str(data.userID) + ".png"
-    pos_prompt = gpt4_api(CN_TXT2IMG_PROMPT, data.history)
-    print(pos_prompt)
-    write_json(data.userID, construct_prompt(pos_prompt))
-    new_images = controlnet_txt2img_api(image_path, pos_prompt, data.userID, data.width, data.height)
-    
-    # 仅保存第一张图片
-    if new_images:  # 检查列表是否为空
-        new_image = new_images[0]
-        new_image.save(os.path.join(image_path))  # 暂时存成edit.png
-        static_path = "static/images/" + str(uuid.uuid4()) + ".png"
-        print("图片链接 http://166.111.139.116:22231/" + static_path)
-        # print("图片链接 http://localhost:8000/" + static_path)
-        new_image.save(static_path)
-        # 构造URL
-        image_url = "http://166.111.139.116:22231/" + static_path
-
+    print(data.history)
     return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
 
 
@@ -202,82 +229,60 @@ def gpt4_mode_1(data: ChatbotData):
     res = gpt4_api(MODE_DECIDE, [context_output])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
     vector_output = construct_vector(res)
-    write_json(data.userID, context_output)
-    write_json(data.userID, vector_output)
     
     res1 = filter_context(data.input, res_vec)  # standard vector
-    write_json(data.userID, construct_context(res1))
     res2 = "Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + "1." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n"  # 输出1个推荐主题
+    tmp = ""
     for i in range(len(res_vec)):  # 5个主题
         new_vector = res_vec.copy()
         new_vector[i] = 1 if new_vector[i] == 0 else 0
-        res1 = filter_context(data.input, new_vector)
-        write_json(data.userID, construct_context(res1))
-        res2 = res2 + str(i+2) + "." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n"  # 输出1个推荐主题
+        res_context = filter_context(data.input, new_vector)
+        tmp = tmp + res_context + "\n"
+        res2 = res2 + str(i+2) + "." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_context)]) + "\n"  # 输出1个推荐主题
     
     topic_output = construct_assistant(res2)
     data.history.append(topic_output)
-    write_json(data.userID, topic_output)
+    write_json(data.userID, context_output, vector_output, construct_context(res1), construct_context(tmp), topic_output)
 
     print(data.history)
     return {"history": data.history}
 
 @app.post("/gpt4_mode_2")  # 第二次实验
 def gpt4_mode_2(data: ChatbotData):
-    print(data.input)
     res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
-    print(res)
     res_vec = extract_lists(res)  # 正则表达式提取出列表
     print(res_vec)
-    write_json(data.userID, construct_user(data.input))
-    write_json(data.userID, construct_vector(str(res_vec)))
 
     res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
-    print(res1)
-    write_json(data.userID, construct_context(res1))
     res2 = gpt4_api(TOPIC_RECOMMEND_2, [construct_user(res1)])  # 输出2个推荐主题
     print(res2)
 
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
     res_random1 = filter_context(data.input, vec_random)
-    print(vec_random)
-    write_json(data.userID, construct_vector(str(vec_random)))
-    print(res_random1)
-    write_json(data.userID, construct_vector(str(res_random1)))
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
     topic_output = construct_assistant("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     data.history.append(topic_output)
-    write_json(data.userID, topic_output)
+    write_json(data.userID, construct_user(data.input), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
 
     print(data.history)
     return {"history": data.history}
 
 @app.post("/gpt4_mode_3")  # 第三次实验
 def gpt4_mode_3(data: ChatbotData):
-    print(data.input)
     res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
-    print(res)
     res_vec = extract_lists(res)  # 正则表达式提取出列表
     print(res_vec)
-    write_json(data.userID, construct_user(data.input))
-    write_json(data.userID, construct_vector(str(res_vec)))
 
     res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
-    print(res1)
-    write_json(data.userID, construct_context(res1))
     res2 = gpt4_api(TOPIC_RECOMMEND_2, [construct_user(res1)])  # 输出2个推荐主题
     print(res2)
 
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
     res_random1 = filter_context(data.input, vec_random)
-    print(vec_random)
-    write_json(data.userID, construct_vector(str(vec_random)))
-    print(res_random1)
-    write_json(data.userID, construct_vector(str(res_random1)))
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
     topic_output = construct_assistant("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     data.history.append(topic_output)
-    write_json(data.userID, topic_output)
+    write_json(data.userID, construct_user(data.input), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
 
     print(data.history)
     return {"history": data.history}
@@ -330,8 +335,7 @@ def reset_user_input():
 
 def reset_state(chatbot, userID):
     chatbot.append((parse_text("A new painting theme."), parse_text("Alright, what kind of theme are you interested in creating?")))
-    write_json(userID, construct_user("A new painting theme."))
-    write_json(userID, construct_assistant("Alright, what kind of theme are you interested in creating?"))
+    write_json(userID, construct_user("A new painting theme."), construct_assistant("Alright, what kind of theme are you interested in creating?"))
     yield chatbot, [], 0
 
 
@@ -384,7 +388,7 @@ def parse_text(text):  # 便于文本以html形式显示
     return text
 
 
-def process_and_save_image(np_image, userID):
+def process_and_save_image(np_image, userID):  # 存档用的
     # 如果输入图像不是numpy数组，则进行转换
     if not isinstance(np_image, np.ndarray):
         np_image = np.array(np_image)
@@ -427,8 +431,7 @@ def read_image(img, chatbot, history, userID):
 
     history.append(construct_user("Please provide suggestions for this image."))
     history.append(construct_assistant(response))
-    write_json(userID, construct_user("Please provide suggestions for this image."))
-    write_json(userID, construct_assistant(response))
+    write_json(userID, construct_user("Please provide suggestions for this image."), construct_assistant(response))
     print(history)
     yield chatbot, history
 
