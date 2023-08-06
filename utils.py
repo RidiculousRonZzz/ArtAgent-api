@@ -12,7 +12,7 @@ import base64
 import cv2
 import openai
 import numpy as np
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict
@@ -48,6 +48,12 @@ Scenario 8 (Weather Mode): The User command is often related to Weather, vector=
 # TXT2IMG_NEG_PROMPT = "给你用户和艺术家的艺术讨论。示例：用户不想画夜晚，你回复night scene；用户想画夜晚，你回复daytime。如果用户提出了想画的人、物、场景或风格，请把这些的反义词总结成全英文关键词，不超过6个词。如果用户没有不想画的，就回复一个空格。一定不要加双引号，不要在开头写create或paint这种词。不要使用中文"
 # TXT2IMG_PROMPT = "给你用户和艺术家的艺术讨论，不要回复中文。若用户认为艺术家对图像描述不正确，你应该听从用户的要求。把用户选择的绘画主题放在开头，写出用于文生图模型的全英文prompt，来画一幅画，词数在50词以内。注意，如果描述比较长，需要提取主要意象和情景；如果较短，一定在突出绘画主体的基础上，运用想象力，添加一些内容以丰富细节。一定不要加双引号，不要在开头写create或paint这种词，直接描述画面。"
 # TRANLATE_IMAGE = "先说“图像生成完毕。”，然后另起一行，以“这幅画描绘了”开头，用中文写出这段英文描绘的场景，要优美流畅，不要让用户意识到你在翻译，而是认为你在点评一幅画。"
+
+# uvicorn utils:app --reload
+# uvicorn utils:app --reload --port 22231 --host 0.0.0.0 --timeout-keep-alive 600 --ws-ping-timeout 600  默认是8000端口，可以改成别的，设置超时为10分钟
+# daphne -u /tmp/daphne.sock -p 22231 utils:app
+# ionia 开放端口：22231-22300
+# http://127.0.0.1:8000/docs 是api文档
 
 def extract_lists(text):  # 把gpt-4输出的standard vector转为list
     matches = re.findall("\[.*?\]", text)
@@ -101,11 +107,6 @@ def gpt4_predict(data: ChatbotData):
     print(data.history)
     return {"history": data.history}
 
-# uvicorn utils:app --reload
-# uvicorn utils:app --reload --port 22231 --host 0.0.0.0 --timeout-keep-alive 600 --ws-ping-timeout 600  默认是8000端口，可以改成别的，设置超时为10分钟
-# daphne -u /tmp/daphne.sock -p 22231 utils:app
-# ionia 开放端口：22231-22300
-# http://127.0.0.1:8000/docs 是api文档
 
 class ImageRequest(BaseModel):
     history: List[Dict[str, str]]
@@ -147,22 +148,20 @@ def gpt4_sd_draw(data: ImageRequest):
     print(data.history)
     return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
 
-class ImageEdit(BaseModel):
+class ImageTopic(BaseModel):
     input: str
     history: List[Dict[str, str]]
     userID: int
-    width: int
-    height: int
     image: UploadFile = File(...)
 
-@app.post("/image_edit_topic")  # 只给评价和推荐
-def gpt4_sd_edit(data: ImageEdit):
+@app.post("/image_edit_topic")  # 暂时不考虑user command只给评价和推荐
+def gpt4_image_edit_topic(data: ImageTopic):
     image_bytes = data.image.file.read()
     image = Image.open(io.BytesIO(image_bytes))
     img = np.array(image)
     process_and_save_image(img, data.userID)
 
-    image_description = gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(img))["result"]])
+    image_description = turbo_api(TRANSLATE, [construct_user(call_visualglm_api(img))["result"]])
 
     res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
@@ -178,6 +177,15 @@ def gpt4_sd_edit(data: ImageEdit):
 
     print(data.history)
     return {"history": data.history}
+
+
+class ImageEdit(BaseModel):
+    input: str
+    history: List[Dict[str, str]]
+    userID: int
+    width: int
+    height: int
+    image: UploadFile = File(...)
 
 @app.post("/gpt4_sd_edit")  # 还没写完!!!
 def gpt4_sd_edit(data: ImageEdit):  # 根据讨论修改图片
@@ -404,6 +412,25 @@ def parse_text(text):  # 便于文本以html形式显示
     return text
 
 
+def read_image(img, chatbot, history, userID):
+    # 如果输入图像是PIL图像，将其转换为numpy数组
+    if isinstance(img, Image.Image):
+        img = np.array(img)
+        
+    process_and_save_image(img, userID)
+    chatbot.append((parse_text("Please provide suggestions for this image."), ""))
+
+    response0 = gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(img))["result"]])
+    response = gpt4_api(UPLOAD_ADVICE, [construct_user(response0)])
+
+    chatbot[-1] = (parse_text("Please provide suggestions for this image."), parse_text(response)) 
+
+    history.append(construct_user("Please provide suggestions for this image."))
+    history.append(construct_assistant(response))
+    write_json(userID, construct_user("Please provide suggestions for this image."), construct_assistant(response))
+    print(history)
+    yield chatbot, history
+
 def process_and_save_image(np_image, userID):  # 存档用的
     # 如果输入图像不是numpy数组，则进行转换
     if not isinstance(np_image, np.ndarray):
@@ -430,26 +457,6 @@ def process_and_save_image(np_image, userID):  # 存档用的
     write_json(userID, construct_photo(img_path))
     img.save(img_path)
     img.save("output/edit-" + str(userID) + ".png")
-
-
-def read_image(img, chatbot, history, userID):
-    # 如果输入图像是PIL图像，将其转换为numpy数组
-    if isinstance(img, Image.Image):
-        img = np.array(img)
-        
-    process_and_save_image(img, userID)
-    chatbot.append((parse_text("Please provide suggestions for this image."), ""))
-
-    response0 = gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(img))["result"]])
-    response = gpt4_api(UPLOAD_ADVICE, [construct_user(response0)])
-
-    chatbot[-1] = (parse_text("Please provide suggestions for this image."), parse_text(response)) 
-
-    history.append(construct_user("Please provide suggestions for this image."))
-    history.append(construct_assistant(response))
-    write_json(userID, construct_user("Please provide suggestions for this image."), construct_assistant(response))
-    print(history)
-    yield chatbot, history
 
 
 def encode_pil_to_base64(image):
