@@ -12,7 +12,8 @@ import base64
 import cv2
 import openai
 import numpy as np
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form, Depends
+from dataclasses import dataclass
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict
@@ -27,10 +28,10 @@ CN_TXT2IMG_PROMPT = "You are to receive an art discussion between a user and an 
 TXT2IMG_NEG_PROMPT = "You are provided with an art discussion between user and artist. If the user mentions the people, objects, scenes, or styles they wish to paint, summarize the antonyms of what they want to paint into ENGLISH keywords, not exceeding 6 words. If the user does not specify what they don't want to paint, reply with a space. For instance, if the user doesn't want to paint nighttime, your response should be 'night scene'; if the user wants to paint nighttime, your response should be 'daytime'. DON'T USE quotation marks, and don't start with words like 'create' or 'paint'"
 TXT2IMG_PROMPT = "Give you art discussions between the user and the artist. If the user believes the artist's description of the image is incorrect, you should comply with the user's request. Place the painting theme chosen by the user at the beginning and write ENGLISH prompt for the text-to-image model to draw a picture, within 50 words. Note that if the description is relatively long, you need to extract the main imagery and scenes; if short, make sure to emphasize the subject of the painting, employ your imagination, and add some content to enrich the details. DON'T add quotation marks, and DON'T begin with words like 'create' or 'paint', just directly describe the scene."
 TRANSLATE = "Translate this Chinese text into English."
-TOPIC_RECOMMEND_1 = "Answer format example:[painting theme here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
-TOPIC_RECOMMEND_2 = "Answer format example:1.[painting theme 1 here, don't use brackets[]]\n2.[painting theme 2 here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 15 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
-EDIT_TOPIC_1 = "Answer format example:[theme here, don't use brackets[]]. You are an imaginative artist. Analyze the most probable intent of the user to modify the painting, considering additions, reductions, or alterations of background objects or style changes, excluding contrast and depth advice. Provide 1 editing theme within a 15-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
-EDIT_TOPIC_2 = "Answer format example:1.[theme 1 here, don't use brackets[]]\n2.[theme 2 here, don't use brackets[]]. Analyze the most probable intent of the user to modify the painting, considering additions, reductions, or alterations of background objects or style changes, excluding contrast and depth advice. Provide 2 editing themes, each theme within a 15-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
+TOPIC_RECOMMEND_1 = "Answer format example:[painting theme here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 20 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
+TOPIC_RECOMMEND_2 = "Answer format example:1.[painting theme 1 here, don't use brackets[]]\n2.[painting theme 2 here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 20 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
+EDIT_TOPIC_1 = "Answer format example:[theme here, don't use brackets[]]. You are an imaginative artist. Analyze the most probable intent of the user to modify the painting, considering additions, reductions, or alterations of background objects or style changes, excluding contrast and depth advice. Provide 1 editing theme within a 20-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
+EDIT_TOPIC_2 = "Answer format example:1.[theme 1 here, don't use brackets[]]\n2.[theme 2 here, don't use brackets[]]. Analyze the most probable intent of the user to modify the painting, considering additions, reductions, or alterations of background objects or style changes, excluding contrast and depth advice. Provide 2 editing themes, each theme within a 20-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
 TOPIC_INTRO = "Based on your painting instruction and context, I recommend the following 3 painting themes. Please CHOOSE ONE to proceed with your creation. If you have a better suggestion, please share it.\n\n"
 MODE_DECIDE = """I will give you information on the user in 6 modalities: Location, Phone Content, Facial Expression, Weather, Music, User Command. There are 8 main scenarios for user AI painting, please judge the user's scenario and output a 5-dimensional vector, where each coordinate is represented by 0 or 1. You should directly respond with the VALUE of the VECTOR, NO EXPLANATION NEEDED, like '[0,0,0,0,0]'.
 Scenario 1 (Normal Mode): vector=[0,0,0,0,0].
@@ -148,37 +149,40 @@ def gpt4_sd_draw(data: ImageRequest):
     print(data.history)
     return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
 
-class ImageTopic(BaseModel):
-    input: str
-    history: List[Dict[str, str]]
-    userID: int
-    image: UploadFile = File(...)
+@dataclass
+class ImageTopic:
+    data: str = Form(...)
+    image: UploadFile = Form(...)
 
 @app.post("/image_edit_topic")  # 暂时不考虑user command只给评价和推荐
-def gpt4_image_edit_topic(data: ImageTopic):
-    image_bytes = data.image.file.read()
+def gpt4_image_edit_topic(para: ImageTopic = Depends()):
+    print(para.data)
+    data = json.loads(para.data)
+    image_bytes = para.image.file.read()
     image = Image.open(io.BytesIO(image_bytes))
     img = np.array(image)
-    process_and_save_image(img, data.userID)
+    process_and_save_image(img, data["userID"])
 
-    image_description = turbo_api(TRANSLATE, [construct_user(call_visualglm_api(img))["result"]])
+    visual_des = call_visualglm_api(img)
+    print(visual_des)
+    image_description = turbo_api(TRANSLATE, [construct_user(visual_des["result"])])
 
-    res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
+    res = gpt4_api(MODE_DECIDE, [construct_user(data["input"])])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
-    res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
+    res1 = filter_context(data["input"], res_vec)  # 输出有用的模态信息
     res2 = gpt4_api(EDIT_TOPIC_2, [construct_user(f"{res1},image:[{image_description}]")])  # 输出2个推荐主题
-
+  
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
-    res_random1 = filter_context(data.input, vec_random)
+    res_random1 = filter_context(data["input"], vec_random)
     res_random2 = gpt4_api(EDIT_TOPIC_1, [construct_user(f"{res_random1},image:[{image_description}]")])
-    topic_output = construct_assistant("Received.\nYour userID is " + str(data.userID) + ".\n\n" + image_description + "\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
-    data.history.append(topic_output)
-    write_json(data.userID, construct_user(data.input), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
-
-    print(data.history)
-    return {"history": data.history}
-
-
+    topic_output = construct_assistant("Received.\nYour userID is " + str(data["userID"]) + ".\n\n" + image_description + "\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
+    data['history'].append(topic_output)
+    write_json(data["userID"], construct_user(data["input"]), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
+    
+    print(data['history'])
+    return {"history": data['history']}
+    
+    
 class ImageEdit(BaseModel):
     input: str
     history: List[Dict[str, str]]
@@ -255,7 +259,7 @@ def gpt4_mode_1(data: ChatbotData):
     print(data.history)
     return {"history": data.history}
 
-@app.post("/gpt4_mode_2")  # 第二次实验
+@app.post("/gpt4_mode_2")  # 第二次实验（如果Phone Content很长，给出主题会损失一定信息，这时候用户会说出自己需求来纠正它）
 def gpt4_mode_2(data: ChatbotData):
     res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
