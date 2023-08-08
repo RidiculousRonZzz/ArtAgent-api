@@ -12,26 +12,27 @@ import base64
 import cv2
 import openai
 import numpy as np
-from fastapi import FastAPI, UploadFile, File, Form, Depends
+from fastapi import FastAPI, UploadFile, Form, Depends
 from dataclasses import dataclass
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict
 import uuid
 import re
+import glob
 import ast
 
 
-ART_ADVICE = "You are a professional art critic. If a user asks for your advice, provide a painting description for inspiration based on the previous chat record, starting with 'You could paint this picture like this', be imaginative, and LIMIT IT TO 120 WORDS without offering multiple scenarios; if the user suggests their own drawing idea, give a concise response to show agreement. DON'T SAY 'I lack the capability to generate images'. If the user uses Chinese, please reply in Chinese."
-UPLOAD_ADVICE = "You are a professional art critic. Upon receiving a textual description of an image, you should first respond with 'Received', followed by a separate paragraph restating this textual description. Then, in another separate paragraph, based on the received text description, it would be best to provide professional and imaginative improvement suggestions, primarily considering adding, reducing, or altering objects in the background or changing the painting style. Avoid giving advice on contrast and depth of field. DON'T SAY 'From your description, you mentioned in the picture', but rather use phrases similar to 'Based on the image you uploaded'. Make the user believe that the image is understood by you. ATTENTION: If the user uses Chinese, please reply in Chinese."
-CN_TXT2IMG_PROMPT = "You are to receive an art discussion between a user and an artist. Analyze the final outcome of the discussion and based on adding, removing, or changing objects in the background or altering the painting style, summarize the key words for the direction of image improvement after the art discussion. Start with the key elements of the original image as an ENGLISH prompt for the text-to-image model. The prompt should not exceed 25 words and should not contain words like 'high contrast'. When replying, write only ENGLISH prompt and DON'T USE quotation marks."
+ART_ADVICE = "You are a professional art critic. If a user asks for your advice, provide a painting description for inspiration based on the previous chat record, starting with 'You could paint this picture like this', be imaginative, and LIMIT IT TO 120 WORDS without offering multiple scenarios; if the user suggests their own drawing idea, give a concise response to show agreement. DON'T SAY 'I lack the capability to generate images'."
+UPLOAD_ADVICE = "You are a professional art critic. Upon receiving a textual description of an image, you should first respond with 'Received', followed by a separate paragraph restating this textual description. Then, in another separate paragraph, based on the received text description, it would be best to provide professional and imaginative improvement suggestions, primarily considering adding, reducing, or altering objects in the background or changing the painting style. Avoid giving advice on contrast and depth of field. DON'T SAY 'From your description, you mentioned in the picture', but rather use phrases similar to 'Based on the image you uploaded'. Make the user believe that the image is understood by you."
+CN_TXT2IMG_PROMPT = "You are to receive an art discussion between a user and an artist. Analyze the final result of the discussion. You need to depict the SCENE of the NEW IMAGE from these perspectives as an ENGLISH prompt for the text-to-image model: main characters or objects; background objects; style. Summarize the improvements to the image after the art discussion, but also retain parts of the original image that were not modified. The prompt should NOT EXCEED 25 words and should not include terms like 'high contrast'. When replying, provide only the ENGLISH prompt and DON'T USE quotation marks."
 TXT2IMG_NEG_PROMPT = "You are provided with an art discussion between user and artist. If the user mentions the people, objects, scenes, or styles they wish to paint, summarize the antonyms of what they want to paint into ENGLISH keywords, not exceeding 6 words. If the user does not specify what they don't want to paint, reply with a space. For instance, if the user doesn't want to paint nighttime, your response should be 'night scene'; if the user wants to paint nighttime, your response should be 'daytime'. DON'T USE quotation marks, and don't start with words like 'create' or 'paint'"
 TXT2IMG_PROMPT = "Give you art discussions between the user and the artist. If the user believes the artist's description of the image is incorrect, you should comply with the user's request. Place the painting theme chosen by the user at the beginning and write ENGLISH prompt for the text-to-image model to draw a picture, within 50 words. Note that if the description is relatively long, you need to extract the main imagery and scenes; if short, make sure to emphasize the subject of the painting, employ your imagination, and add some content to enrich the details. DON'T add quotation marks, and DON'T begin with words like 'create' or 'paint', just directly describe the scene."
 TRANSLATE = "Translate this Chinese text into English."
 TOPIC_RECOMMEND_1 = "Answer format example:[painting theme here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 20 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
 TOPIC_RECOMMEND_2 = "Answer format example:1.[painting theme 1 here, don't use brackets[]]\n2.[painting theme 2 here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 20 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
-EDIT_TOPIC_1 = "Answer format example:[theme here, don't use brackets[]]. You are an imaginative artist. Analyze the most probable intent of the user to modify the painting, considering additions, reductions, or alterations of background objects or style changes, excluding contrast and depth advice. Provide 1 editing theme within a 20-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
-EDIT_TOPIC_2 = "Answer format example:1.[theme 1 here, don't use brackets[]]\n2.[theme 2 here, don't use brackets[]]. Analyze the most probable intent of the user to modify the painting, considering additions, reductions, or alterations of background objects or style changes, excluding contrast and depth advice. Provide 2 editing themes, each theme within a 20-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
+EDIT_TOPIC_1 = "Answer format example:[theme here, don't use brackets[]]. You are a creative artist. Determine the most likely intention of the user in editing the painting. From the following 5 options, select 1 to offer image modification suggestions and DESCRIBE THE NEW IMAGE SCENE: considering the addition, removal, or modification of background objects; style changes; generating new images based on the original style; creating new images based on the posture of the person in the original; if the original image is indoors or features buildings, produce a detailed design drawing. Exclude suggestions on contrast and depth. Offer one editing theme within a 20-WORD LIMIT, following the user's instruction, but enhance with supplementary details."
+EDIT_TOPIC_2 = "Answer format example:1.[theme 1 here, don't use brackets[]]\n2.[theme 2 here, don't use brackets[]]. You are a creative artist. Determine the most likely intention of the user in editing the painting. From the following 5 options, each theme select 1 to offer image modification suggestions and DESCRIBE THE NEW IMAGE SCENE: considering the addition, removal, or modification of background objects; style changes; generating new images based on the original style; creating new images based on the posture of the person in the original; if the original image is indoors or features buildings, produce a detailed design drawing. Exclude suggestions on contrast and depth. Provide 2 editing themes, each theme within a 20-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
 TOPIC_INTRO = "Based on your painting instruction and context, I recommend the following 3 painting themes. Please CHOOSE ONE to proceed with your creation. If you have a better suggestion, please share it.\n\n"
 MODE_DECIDE = """I will give you information on the user in 6 modalities: Location, Phone Content, Facial Expression, Weather, Music, User Command. There are 8 main scenarios for user AI painting, please judge the user's scenario and output a 5-dimensional vector, where each coordinate is represented by 0 or 1. You should directly respond with the VALUE of the VECTOR, NO EXPLANATION NEEDED, like '[0,0,0,0,0]'.
 Scenario 1 (Normal Mode): vector=[0,0,0,0,0].
@@ -42,6 +43,12 @@ Scenario 5 (Travel Mode): The location is often famous attractions, and the User
 Scenario 6 (Music Mode): The location is often bars, concert halls, coffee shops, residential buildings and other entertainment and life places. The Music is not empty, vector=[1,0,1,1,1].
 Scenario 7 (Facial Expression Mode): The User command is often related to Facial Expression, vector=[0,0,1,0,0].
 Scenario 8 (Weather Mode): The User command is often related to Weather, vector=[0,0,0,1,0]."""
+EDIT_TOOLS = """Choose the most appropriate image modification tool based on previous discussion and JUST OUTPUT THE NUMBER (1-5):
+1. Shuffle: APPLY the STYLE of the input image to a new image.
+2. Softedge_hed: CHANGE the artistic STYLE of the image without adding or removing objects from the image.
+3. Depth: Add or remove objects in the image.
+4. Openpose: Create a new image with the SAME POSE as the person in the original image.
+5. Mlsd: Generate ARCHITECTURAL or INTERIOR DESIGN drawings based on the original image."""
 
 # ART_ADVICE = "你是一个专业的艺术评论家。如果用户询问你的建议，你就根据之前的聊天记录，给用户一个绘画描述以提供灵感，以“您可以这样画这幅画”开头，要富有想象力，在150字以内，不要给出多种场景；如果用户提出自己的绘图建议，你要做出简要回答表示赞同。要使用中文回复，不要加双引号，不要说“我不具备生成图片的能力”"
 # UPLOAD_ADVICE = "你是一个专业的艺术评论家。给你关于用户图片的文字描述，你要先回复“收到图片”，接着另起一段，复述这段文字描述。然后另起一段，根据收到的文字描述，最好从增减或改变背景中的物体、变换绘画风格出发，提出专业有想象力的改进建议，不要有对比度、层次感这方面的建议。不要说“从你的描述中，您提到图片中”，而是要说“根据您上传的图片”这种类似的话。你要让用户认为图片是你自己理解的"
@@ -84,34 +91,45 @@ def flip_random_bit(vector):
     return vector_copy
 
 def write_json(userID, *args):
-    with open('output/' + str(userID) + '.json', 'a', encoding='utf-8') as f:
+    with open('output/' + userID + '.json', 'a', encoding='utf-8') as f:
         for arg in args:
             json.dump(arg, f, ensure_ascii=False)  # False，可保存utf-8编码
             f.write('\n')
 
+def save_userID_image(user_id, img):
+    """
+    保存图片到特定用户的文件夹下。如果该用户的文件夹下已经有4张图片，那么新的图片将命名为5.jpg，返回"5"
+    image = Image.open('input.jpg')
+    save_userID_image('123', image)
+    """
+    path = os.path.join('output', user_id)
+    os.makedirs(path, exist_ok=True)  # 如果文件夹不存在，那么创建它
+    existing_images = glob.glob(os.path.join(path, '*.jpg'))
+    new_image_name = str(len(existing_images) + 1) + '.jpg'
+    img.save(os.path.join(path, new_image_name))
+    return str(len(existing_images) + 1)
 
 class ChatbotData(BaseModel):
     input: str
     history: List[Dict[str, str]]
-    userID: int
+    userID: str
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
-# 可以通过 URL /static/image.png 来访问文件
+# 可以通过 URL /static/image.jpg 来访问文件
 @app.post("/gpt4_predict")  # 只有data.history满足gpt-4的api格式，不能污染它
 def gpt4_predict(data: ChatbotData):
     res = gpt4_api(ART_ADVICE, data.history)
     assistant_output = construct_assistant(res)
     data.history.append(assistant_output)
 
-    write_json(data.userID, construct_user(data.input), assistant_output)
+    write_json(data.userID, assistant_output)
     print(data.history)
     return {"history": data.history}
 
-
 class ImageRequest(BaseModel):
     history: List[Dict[str, str]]
-    userID: int
+    userID: str
     cnt: int
     width: int
     height: int
@@ -126,10 +144,10 @@ def gpt4_sd_draw(data: ImageRequest):
     neg_prompt = gpt4_api(TXT2IMG_NEG_PROMPT, data.history)
     print(f"neg_prompt: {neg_prompt}")
     data.history = tmp_history
-    new_images = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height)
+    new_images, imageID = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height)
     
     new_image = new_images[0]
-    static_path = "static/images/" + str(uuid.uuid4()) + ".png"
+    static_path = "static/images/" + str(uuid.uuid4()) + ".jpg"
     print("图片链接 http://166.111.139.116:22231/" + static_path)
     # print("图片链接 http://localhost:8000/" + static_path)
     new_image.save(static_path)
@@ -142,10 +160,10 @@ def gpt4_sd_draw(data: ImageRequest):
         write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."), construct_assistant("My apologies, I will amend the description and generate a new image."))
     data.cnt = data.cnt + 1
 
-    response = "Complete.\n\n" + turbo_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
+    response = turbo_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
 
-    data.history.append(construct_assistant(response))
-    write_json(data.userID, construct_prompt(pos_prompt + "\n" + neg_prompt), construct_user("Please generate an image based on our previous art discussion."), construct_assistant(response))
+    data.history.append(construct_assistant(f"ImageID is {imageID}.\n\n{response}"))
+    write_json(data.userID, construct_prompt(pos_prompt + "\n" + neg_prompt), construct_user("Please generate an image based on our previous art discussion."), construct_assistant(f"ImageID is {imageID}.\n\n{response}"))
     print(data.history)
     return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
 
@@ -161,7 +179,8 @@ def gpt4_image_edit_topic(para: ImageTopic = Depends()):
     image_bytes = para.image.file.read()
     image = Image.open(io.BytesIO(image_bytes))
     img = np.array(image)
-    process_and_save_image(img, data["userID"])
+    # process_and_save_image(img, data["userID"])
+    imageID = save_userID_image(data["userID"], image)
 
     visual_des = call_visualglm_api(img)
     print(visual_des)
@@ -175,63 +194,58 @@ def gpt4_image_edit_topic(para: ImageTopic = Depends()):
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
     res_random1 = filter_context(data["input"], vec_random)
     res_random2 = gpt4_api(EDIT_TOPIC_1, [construct_user(f"{res_random1},image:[{image_description}]")])
-    topic_output = construct_assistant("Received.\nYour userID is " + str(data["userID"]) + ".\n\n" + image_description + "\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
+    topic_output = construct_assistant("Received.\nYour userID is " + data["userID"] + f", imageID is {imageID}.\n\n" + image_description + "\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     data['history'].append(topic_output)
     write_json(data["userID"], construct_user(data["input"]), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
     
     print(data['history'])
     return {"history": data['history']}
     
-    
-class ImageEdit(BaseModel):
-    input: str
+
+class ImageEditRequest(BaseModel):
     history: List[Dict[str, str]]
-    userID: int
-    width: int
-    height: int
-    image: UploadFile = File(...)
-
-@app.post("/gpt4_sd_edit")  # 还没写完!!!
-def gpt4_sd_edit(data: ImageEdit):  # 根据讨论修改图片
-    image_bytes = data.image.file.read()
-    image = Image.open(io.BytesIO(image_bytes))
-    img = np.array(image)
-    process_and_save_image(img, data.userID)
-
+    userID: str
+    editID: str
+    
+@app.post("/gpt4_sd_edit")
+def gpt4_sd_edit(data: ImageEditRequest):  # 根据讨论修改图片
     tmp_history = data.history
     if len(data.history) > 0:  # 去掉绘画指令那一句
         data.history.pop()
     pos_prompt = gpt4_api(TXT2IMG_PROMPT, data.history)
     print(f"pos_prompt: {pos_prompt}")
-    neg_prompt = gpt4_api(TXT2IMG_NEG_PROMPT, data.history)
-    print(f"neg_prompt: {neg_prompt}")
     data.history = tmp_history
 
-    write_json(data.userID, construct_prompt(pos_prompt + "\n" + neg_prompt))
-    new_images = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height)
-    
+    toolID = gpt4_api(EDIT_TOOLS, data.history)
+    match = re.search(r'([1-5])', toolID)
+    toolID = match.group(1)
+    print(f"toolID:{toolID}")
+    switch = {
+        '1': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "shuffle", "control_v11e_sd15_shuffle [526bfdae]"),  # 风格迁移
+        '2': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]"),  # 风格化
+        '3': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "depth_zoe", "control_v11f1p_sd15_depth [cfd03158]"),  # 增减物体
+        '4': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "openpose_full", "control_v11p_sd15_openpose [cab727d4]"),  # 姿态控制
+        '5': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "mlsd", "control_v11p_sd15_mlsd [aca30ff0]")  # 建筑设计，适合建筑物和室内空间
+    }
+    func = switch.get(toolID)
+    if func:
+        new_images, imageID = func()
+    else:
+        print('无效的toolID')
+
     new_image = new_images[0]
-    static_path = "static/images/" + str(uuid.uuid4()) + ".png"
+    static_path = "static/images/" + str(uuid.uuid4()) + ".jpg"
     print("图片链接 http://166.111.139.116:22231/" + static_path)
     # print("图片链接 http://localhost:8000/" + static_path)
     new_image.save(static_path)
     # 构造URL
     image_url = "http://166.111.139.116:22231/" + static_path
 
-    if data.cnt > 0:
-        data.history.append(construct_user("This image doesn't align with my vision, please revise the description."))
-        data.history.append(construct_assistant("My apologies, I will amend the description and generate a new image."))
-        write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."))
-        write_json(data.userID, construct_assistant("My apologies, I will amend the description and generate a new image."))
-    data.cnt = data.cnt + 1
-
-    response = "Complete.\n\n" + gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
-
+    response = f"ImageID is {imageID}.\n\n" + turbo_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
     data.history.append(construct_assistant(response))
-    write_json(data.userID, construct_user("Please generate an image based on our previous art discussion."))
-    write_json(data.userID, construct_assistant(response))
+    write_json(data.userID, construct_prompt(pos_prompt), construct_assistant(f"toolID:{toolID}"), construct_assistant(response))
     print(data.history)
-    return {"history": data.history, "image_url": image_url, "cnt": str(data.cnt)}
+    return {"history": data.history, "image_url": image_url}
 
 
 @app.post("/gpt4_mode_1")  # 第一次实验
@@ -243,7 +257,7 @@ def gpt4_mode_1(data: ChatbotData):
     vector_output = construct_vector(res)
     
     res1 = filter_context(data.input, res_vec)  # standard vector
-    res2 = "Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + "1." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n"  # 输出1个推荐主题
+    res2 = "Your userID is " + data.userID + ".\n\n" + TOPIC_INTRO + "1." + gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res1)]) + "\n"  # 输出1个推荐主题
     tmp = ""
     for i in range(len(res_vec)):  # 5个主题
         new_vector = res_vec.copy()
@@ -272,7 +286,7 @@ def gpt4_mode_2(data: ChatbotData):
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
     res_random1 = filter_context(data.input, vec_random)
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
-    topic_output = construct_assistant("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
+    topic_output = construct_assistant("Your userID is " + data.userID + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     data.history.append(topic_output)
     write_json(data.userID, construct_user(data.input), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
 
@@ -292,7 +306,7 @@ def gpt4_mode_3(data: ChatbotData):
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
     res_random1 = filter_context(data.input, vec_random)
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
-    topic_output = construct_assistant("Your userID is " + str(data.userID) + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
+    topic_output = construct_assistant("Your userID is " + data.userID + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     data.history.append(topic_output)
     write_json(data.userID, construct_user(data.input), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
 
@@ -435,7 +449,7 @@ def read_image(img, chatbot, history, userID):
     print(history)
     yield chatbot, history
 
-def process_and_save_image(np_image, userID):  # 存档用的
+def process_and_save_image(np_image, userID):  # 存档用的，可以用于调取以往的数据！！！
     # 如果输入图像不是numpy数组，则进行转换
     if not isinstance(np_image, np.ndarray):
         np_image = np.array(np_image)
@@ -457,21 +471,23 @@ def process_and_save_image(np_image, userID):  # 存档用的
     img = Image.fromarray(np_image)
     
     # 将图像保存到指定路径
-    img_path = 'output/' + time.strftime("%Y-%m-%d-%H-%M-%S-", time.localtime()) + str(random.randint(1000, 9999)) + "-upload-"  + str(userID) + '.png'
+    img_path = 'output/' + time.strftime("%Y-%m-%d-%H-%M-%S-", time.localtime()) + str(random.randint(1000, 9999)) + "-upload-"  + userID + '.jpg'
     write_json(userID, construct_photo(img_path))
     img.save(img_path)
-    img.save("output/edit-" + str(userID) + ".png")
+    img.save("output/edit-" + userID + ".jpg")
 
 
 def encode_pil_to_base64(image):
     with io.BytesIO() as output_bytes:
-        image.save(output_bytes, format="PNG")
+        image.save(output_bytes, format="JPEG")
         bytes_data = output_bytes.getvalue()
     return base64.b64encode(bytes_data).decode("utf-8")
 
-
-def controlnet_txt2img_api(image_path, pos_prompt, userID, width, height, sampler="DPM++ 2M Karras", cn_module="canny", cn_model="control_v11p_sd15_canny [d14c016b]"):
+def controlnet_txt2img_api(image_path, pos_prompt, userID, cn_module, cn_model, sampler="DPM++ 2M Karras"):
+    # url = 'http://127.0.0.1:6016/sdapi/v1/txt2img'
+    url = "https://gt29495501.yicp.fun/sdapi/v1/txt2img"
     controlnet_image = Image.open(image_path)
+    width, height = controlnet_image.size
     controlnet_image_data = encode_pil_to_base64(controlnet_image)
     txt2img_data = {
         "prompt": "((masterpiece, best quality, ultra-detailed, illustration))" + pos_prompt,
@@ -496,24 +512,24 @@ def controlnet_txt2img_api(image_path, pos_prompt, userID, width, height, sample
             }
         }
     }
-
-    response = requests.post(url=f'http://127.0.0.1:6016/sdapi/v1/txt2img', json=txt2img_data)
+    response = requests.post(url, json=txt2img_data)
     print(txt2img_data["width"])
     print(txt2img_data["height"])
     r = response.json()
     image_list = []
-    os.makedirs('output', exist_ok=True)
     for i in r['images']:
         image = Image.open(io.BytesIO(base64.b64decode(i.split(",",1)[0])))
         image_list.append(image)
-        output_path = 'output/' + time.strftime("%Y-%m-%d-%H-%M-%S-", time.localtime()) + str(random.randint(1000, 9999)) + "-cn-"  + str(userID) + '.png'
-        image.save(output_path)
-        write_json(userID, construct_photo(output_path))
-    return image_list
+        # output_path = 'output/' + time.strftime("%Y-%m-%d-%H-%M-%S-", time.localtime()) + str(random.randint(1000, 9999)) + "-cn-"  + userID + '.jpg'
+        imageID = save_userID_image(userID, image)
+        write_json(userID, construct_photo(f"output/{userID}/{imageID}.jpg"))
+
+    return image_list, imageID
 
 
-def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height, user_input=""):
-    url = "http://127.0.0.1:6016"
+def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height):
+    # url = "http://127.0.0.1:6016"
+    url = "https://gt29495501.yicp.fun"
     payload = {
         "enable_hr": True,  # True画质更好但更慢
         # "enable_hr": False,  # True画质更好但更慢
@@ -532,15 +548,14 @@ def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height, user_input=""):
     response = requests.post(url=f'{url}/sdapi/v1/txt2img', json=payload)
     r = response.json()
     image_list = []
-    os.makedirs('output', exist_ok=True)
     for i in r['images']:
         image = Image.open(io.BytesIO(base64.b64decode(i.split(",",1)[0])))
         image_list.append(image)
-        output_path = 'output/'+ time.strftime("%Y-%m-%d-%H-%M-%S-", time.localtime()) + str(user_input[:12]) + "-" + str(userID) +'.png'
-        image.save(output_path)
-        write_json(userID, construct_photo(output_path))
+        # output_path = 'output/'+ time.strftime("%Y-%m-%d-%H-%M-%S-", time.localtime()) + str(user_input[:12]) + "-" + userID +'.jpg'
+        imageID = save_userID_image(userID, image)
+        write_json(userID, construct_photo(f"output/{userID}/{imageID}.jpg"))
 
-    return image_list
+    return image_list, imageID
 
 
 def call_visualglm_api(img, history=[]):
@@ -550,7 +565,7 @@ def call_visualglm_api(img, history=[]):
 
     # 将BGR图像转换为RGB图像
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img_byte = cv2.imencode('.png', img)[1]
+    img_byte = cv2.imencode('.jpg', img)[1]
     img_base64 = base64.b64encode(img_byte).decode("utf-8")
     payload = {
         "image": img_base64,
