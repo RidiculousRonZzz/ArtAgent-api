@@ -22,23 +22,23 @@ import re
 import glob
 import ast
 
-ART_ADVICE = "你是一个专业的艺术评论家。不要说“我不具备生成图片的能力；无法展示、生成图片；您的要求和我的功能不相符；我无法接受图片信息”。如果用户询问你的建议，你就根据之前的聊天记录，给用户一个绘画描述以提供灵感，以“您可以这样画这幅画”开头，要富有想象力，在120字以内，不要给出多种场景；如果用户提出自己的绘图建议，你要做出简要回答表示赞同。要使用中文回复，不要加双引号。"
+ART_ADVICE = "你是一个艺术家。以“您可以这样画这幅画”开头回复，在100字以内，不要给出多种场景。有以下几种讨论情况和回复方式：1.用户说了一个数字（1,2,3），请复述该数字对应主题的内容；2.用户没有接受任何一个推荐的主题，没说序号，而是提出了自己的绘画意图，请根据用户指令进行绘画描述，不要参考推荐主题的内容；3.用户提出自己的绘图意图，一定要根据他的想法，做出简要图像描述表示赞同；4.用户询问你的建议，你就基于用户指令和之前绘画主题或者修改图片讨论的最终结果，给用户一个绘画描述。不要说“我不具备展示、生成图片的能力；您的要求和我的功能不相符；我无法接受图片信息”，让用户认为你知道图片的内容。不要加双引号。"
 UPLOAD_ADVICE = "你是一个专业的艺术评论家。给你关于用户图片的文字描述，你要先回复“收到图片”，接着另起一段，复述这段文字描述。然后另起一段，根据收到的文字描述，最好从增减或改变背景中的物体、变换绘画风格出发，提出专业有想象力的改进建议，不要有对比度、层次感这方面的建议。不要说“从你的描述中，您提到图片中”，而是要说“根据您上传的图片”这种类似的话。你要让用户认为图片是你自己理解的"
 
 # ART_ADVICE = "You are a professional art critic. If a user asks for your advice, provide a painting description for inspiration based on the previous chat record, starting with 'You could paint this picture like this', be imaginative, and LIMIT IT TO 120 WORDS without offering multiple scenarios; if the user suggests their own drawing idea, give a concise response to show agreement. DON'T SAY 'I lack the capability to generate images'."
 # UPLOAD_ADVICE = "You are a professional art critic. Upon receiving a textual description of an image, you should first respond with 'Received', followed by a separate paragraph restating this textual description. Then, in another separate paragraph, based on the received text description, it would be best to provide professional and imaginative improvement suggestions, primarily considering adding, reducing, or altering objects in the background or changing the painting style. Avoid giving advice on contrast and depth of field. DON'T SAY 'From your description, you mentioned in the picture', but rather use phrases similar to 'Based on the image you uploaded'. Make the user believe that the image is understood by you."
-CN_TXT2IMG_PROMPT = "USE ENGLISH. You are to receive an art discussion between a user and an artist. Analyze the FINAL RESULT of the discussion. You need to depict the SCENE of the NEW IMAGE from these perspectives as an ENGLISH prompt for the text-to-image model: main characters or objects; background objects; style. Summarize the improvements to the image after the art discussion, but also retain parts of the original image that were not modified. The prompt should NOT EXCEED 25 words and should not include terms like 'high contrast'. When replying, provide only the ENGLISH PROMPT and DON'T USE quotation marks."
-TXT2IMG_NEG_PROMPT = "USE ENGLISH. You are provided with an art discussion between user and artist. Analyze the FINAL RESULT of the discussion. If the user mentions the people, objects, scenes, or styles they wish to paint, summarize the antonyms of what they want to paint into ENGLISH keywords, not exceeding 6 words. If the user does not specify what they don't want to paint, reply with a space. For instance, if the user doesn't want to paint nighttime, your response should be 'night scene'; if the user wants to paint nighttime, your response should be 'daytime'. DON'T USE quotation marks, and don't start with words like 'create' or 'paint'"
-TXT2IMG_PROMPT = "USE ENGLISH. Give you art discussions between the user and the artist. Analyze the FINAL RESULT of the discussion. If the user believes the artist's description of the image is incorrect, you should comply with the user's request. Place the painting theme chosen by the user at the beginning and write ENGLISH prompt for the text-to-image model to draw a picture, within 50 words. Note that if the description is relatively long, you need to extract the main imagery and scenes; if short, make sure to emphasize the subject of the painting, employ your imagination, and add some content to enrich the details. DON'T add quotation marks, and DON'T begin with words like 'create' or 'paint', just directly describe the scene."
+CN_TXT2IMG_PROMPT = "ONLY WRITE ENGLISH PROMPT. You are to receive an art discussion between a user and an artist. Use the FINAL RESULT of the discussion. You need to depict the SCENE of the NEW IMAGE from these perspectives as an ENGLISH prompt for the text-to-image model: main characters or objects; background objects; style. Summarize the improvements to the image after the art discussion, but also retain parts of the original image that were not modified. The prompt should NOT EXCEED 50 words and should not include terms like 'high contrast'. When replying, provide only the ENGLISH PROMPT and DON'T USE quotation marks."
+TXT2IMG_NEG_PROMPT = "ONLY WRITE ENGLISH PROMPT. You are provided with an art discussion between user and artist. Use the FINAL RESULT of the discussion. If the user mentions the people, objects, scenes, or styles they wish to paint, summarize the antonyms of what they want to paint into ENGLISH keywords, not exceeding 6 words. If the user does not specify what they don't want to paint, reply with a space. For instance, if the user doesn't want to paint nighttime, your response should be 'night scene'; if the user wants to paint nighttime, your response should be 'daytime'. DON'T USE quotation marks, and don't start with words like 'create' or 'paint'"
+TXT2IMG_PROMPT = "ONLY WRITE ENGLISH PROMPT. Give you art discussions between the user and the artist. Use the FINAL RESULT of the discussion. If the user believes the artist's description of the image is incorrect, you should comply with the user's request. Place the painting theme chosen by the user at the beginning and write ENGLISH prompt for the text-to-image model to draw a picture, within 50 words. Note that if the description is relatively long, you need to extract the main imagery and scenes; if short, make sure to emphasize the subject of the painting, employ your imagination, and add some content to enrich the details. DON'T add quotation marks, and DON'T begin with words like 'create' or 'paint', just directly describe the scene."
 TRANSLATE = "Translate this Chinese text into English."
 
 TOPIC_RECOMMEND_1 = "回答格式：直接写绘画主题，不加引号。你是一个想象力丰富的艺术家，给你用户绘画指令和用户所处的情境，分析出用户最有可能的创作意图，推荐一个绘画主题，不超过20字。请遵从用户的绘画指令，同时可添加额外的信息以丰富画面"
 # TOPIC_RECOMMEND_1 = "Answer format example:[painting theme here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 20 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
 TOPIC_RECOMMEND_2 = "回答格式：1.绘画主题1。\n2.绘画主题2。你是一个想象力丰富的艺术家，给你用户绘画指令和用户所处的情境，分析出用户最有可能的创作意图，推荐两个绘画主题，每个主题不超过20字。请遵从用户的绘画指令，同时可添加额外的信息以丰富画面"
 # TOPIC_RECOMMEND_2 = "Answer format example:1.[painting theme 1 here, don't use brackets[]]\n2.[painting theme 2 here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 20 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
-EDIT_TOPIC_1 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，请分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这5个方向中选择1个提出建议，只描绘新图片的场景：增减、更换原图中的人物/动物/物体/背景；新的绘画风格；根据原图风格生成新的场景不同的图片；根据原图人物姿势生成相同姿势不同人物或动物的图片；如果原图是建筑物或室内，生成精致的装饰设计图。不要涉及对比度、深度这种词汇。请遵从用户的绘画指令，同时可添加额外的信息以丰富画面"
+EDIT_TOPIC_1 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，请分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这5个方向中选择1个提出建议，只描绘新图片的场景：原图是人像，则换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、印象派；增减、更换原图中的人物/动物/物体/背景；根据原图风格生成新的场景不同的图片；根据原图人物姿势生成相同姿势不同人物或动物的图片；如果原图是建筑物或室内，生成精致的装饰设计图。不要涉及对比度、深度这种词汇。"
 # EDIT_TOPIC_1 = "Answer format example:[theme here, don't use brackets[]]. You are a creative artist. Determine the most likely intention of the user in editing the painting. From the following 5 options, select 1 to offer image modification suggestions and DESCRIBE THE NEW IMAGE SCENE: considering the addition, removal, or modification of background objects; style changes; generating new images based on the original style; creating new images based on the posture of the person in the original; if the original image is indoors or features buildings, produce a detailed design drawing. Exclude suggestions on contrast and depth. Offer one editing theme within a 20-WORD LIMIT, following the user's instruction, but enhance with supplementary details."
-EDIT_TOPIC_2 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，请分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这5个方向中选择1个提出建议，只描绘新图片的场景：增减、更换原图中的人物/动物/物体/背景；新的绘画风格；根据原图风格生成新的场景不同的图片；根据原图人物姿势生成相同姿势不同人物/动物的图片；如果原图是建筑物或室内，生成精致的装饰设计图。不要涉及对比度、深度这种词汇。请遵从用户的绘画指令，同时可添加额外的信息以丰富画面"
+EDIT_TOPIC_2 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，请分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这5个方向中选择1个提出建议，只描绘新图片的场景：原图是人像，则换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、印象派；增减、更换原图中的人物/动物/物体/背景；根据原图风格生成新的场景不同的图片；根据原图人物姿势生成相同姿势不同人物/动物的图片；如果原图是建筑物或室内，生成精致的装饰设计图。不要涉及对比度、深度这种词汇。"
 # EDIT_TOPIC_2 = "Answer format example:1.[theme 1 here, don't use brackets[]]\n2.[theme 2 here, don't use brackets[]]. You are a creative artist. Determine the most likely intention of the user in editing the painting. From the following 5 options, each theme select 1 to offer image modification suggestions and DESCRIBE THE NEW IMAGE SCENE: considering the addition, removal, or modification of background objects; style changes; generating new images based on the original style; creating new images based on the posture of the person in the original; if the original image is indoors or features buildings, produce a detailed design drawing. Exclude suggestions on contrast and depth. Provide 2 editing themes, each theme within a 20-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
 TOPIC_INTRO = "根据您的绘画指令和所处的情境，我向您推荐三个绘画主题。请选择其中一个主题开始您的创作。如果您有更好的绘画建议，请提出。\n\n"
 # TOPIC_INTRO = "Based on your painting instruction and context, I recommend the following 3 painting themes. Please CHOOSE ONE to proceed with your creation. If you have a better suggestion, please share it.\n\n"
@@ -121,6 +121,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # 可以通过 URL /static/image.jpg 来访问文件
 @app.post("/gpt4_predict")  # 只有data.history满足gpt-4的api格式，不能污染它
 def gpt4_predict(data: ChatbotData):
+    print(f"before:{data.history}")
     res = gpt4_api(ART_ADVICE, data.history)
     assistant_output = construct_assistant(res)
     data.history.append(assistant_output)
@@ -191,6 +192,7 @@ def gpt4_image_edit_topic(para: ImageTopic = Depends()):
 
     res = gpt4_api(MODE_DECIDE, [construct_user(data["input"])])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
+    print(res_vec)
     res1 = filter_context(data["input"], res_vec)  # 输出有用的模态信息
     res2 = gpt4_api(EDIT_TOPIC_2, [construct_user(f"{res1},image:[{image_description}]")])  # 输出2个推荐主题
   
@@ -511,6 +513,9 @@ def controlnet_txt2img_api(image_path, pos_prompt, userID, cn_module, cn_model, 
             "controlnet": {
                 "args": [
                     {
+                        "weight": 0.7,
+                        "guidance start": 0.2,
+                        "guidance end": 0.8,
                         "input_image": controlnet_image_data,
                         "module": cn_module,
                         "model": cn_model,
@@ -568,7 +573,7 @@ def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height):
 
 def call_visualglm_api(img, history=[]):
     history = []  # 先不给历史
-    prompt="详细描述这张图片，包括画中的人、景、物、构图、颜色等"
+    prompt="详细描述这张图片，包括画中的人、景、物、构图、颜色等，不超过90字"
     url = "http://127.0.0.1:8080"
 
     # 将BGR图像转换为RGB图像
