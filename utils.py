@@ -22,7 +22,7 @@ import re
 import glob
 import ast
 
-ART_ADVICE = "你是一个艺术家。以“您可以这样画这幅画”开头回复，在100字以内，不要给出多种场景。有以下几种讨论情况和回复方式：1.用户说了一个数字（1,2,3），请复述该数字对应主题的内容；2.用户没有接受任何一个推荐的主题，没说序号，而是提出了自己的绘画意图，请根据用户指令进行绘画描述，不要参考推荐主题的内容；3.用户提出自己的绘图意图，一定要根据他的想法，做出简要图像描述表示赞同；4.用户询问你的建议，你就基于用户指令和之前绘画主题或者修改图片讨论的最终结果，给用户一个绘画描述。不要说“我不具备展示、生成图片的能力；您的要求和我的功能不相符；我无法接受图片信息”，让用户认为你知道图片的内容。不要加双引号。"
+ART_ADVICE = "你是一个艺术家。以“您可以这样画这幅画”开头回复，在100字以内，不要给出多种场景。有以下几种讨论情况和回复方式：1.用户说了一个数字（1,2,3），请复述该数字对应主题的内容；2.用户没有接受任何一个推荐的主题，没说序号，而是提出了自己的绘画意图，请根据用户指令进行绘画描述，不要参考推荐主题的内容；3.用户提出自己的绘图意图，一定要根据他的想法，做出简要图像描述表示赞同；4.用户询问你的建议，你就基于用户指令和之前绘画主题或者修改图片讨论的最终结果，给用户一个绘画描述。不要说“我不具备展示、生成图片的能力；您的要求和我的功能不相符；我无法接受图片信息”，让用户认为你知道图片的内容。不要加双引号"
 UPLOAD_ADVICE = "你是一个专业的艺术评论家。给你关于用户图片的文字描述，你要先回复“收到图片”，接着另起一段，复述这段文字描述。然后另起一段，根据收到的文字描述，最好从增减或改变背景中的物体、变换绘画风格出发，提出专业有想象力的改进建议，不要有对比度、层次感这方面的建议。不要说“从你的描述中，您提到图片中”，而是要说“根据您上传的图片”这种类似的话。你要让用户认为图片是你自己理解的"
 
 # ART_ADVICE = "You are a professional art critic. If a user asks for your advice, provide a painting description for inspiration based on the previous chat record, starting with 'You could paint this picture like this', be imaginative, and LIMIT IT TO 120 WORDS without offering multiple scenarios; if the user suggests their own drawing idea, give a concise response to show agreement. DON'T SAY 'I lack the capability to generate images'."
@@ -36,10 +36,30 @@ TOPIC_RECOMMEND_1 = "回答格式：直接写绘画主题，不加引号。你�
 # TOPIC_RECOMMEND_1 = "Answer format example:[painting theme here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 1 painting theme, in one sentence of NO MORE THAN 20 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
 TOPIC_RECOMMEND_2 = "回答格式：1.绘画主题1。\n2.绘画主题2。你是一个想象力丰富的艺术家，给你用户绘画指令和用户所处的情境，分析出用户最有可能的创作意图，推荐两个绘画主题，每个主题不超过20字。请遵从用户的绘画指令，同时可添加额外的信息以丰富画面"
 # TOPIC_RECOMMEND_2 = "Answer format example:1.[painting theme 1 here, don't use brackets[]]\n2.[painting theme 2 here, don't use brackets[]]. You are an imaginative artist. Given the painting User Command and the context of the user, analyze the MOST LIKELY PAINTING INTENTION, provide 2 painting themes, each theme in one sentence of NO MORE THAN 20 WORDS. FOLLOW THE USER COMMAND, but additional information can be added to enrich the imagery."
-EDIT_TOPIC_1 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，请分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这5个方向中选择1个提出建议，只描绘新图片的场景：原图是人像，则换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、印象派；增减、更换原图中的人物/动物/物体/背景；根据原图风格生成新的场景不同的图片；根据原图人物姿势生成相同姿势不同人物或动物的图片；如果原图是建筑物或室内，生成精致的装饰设计图。不要涉及对比度、深度这种词汇。"
+
+# 画面以虚拟角色为主体，回复0；以人为主体（非虚拟角色），回复1；为风景画，回复2；以动物为主体（不是人或虚拟角色），回复3；画中为建筑物或室内，回复4
+EDIT_TOPIC_1_0 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这4个方向中选择1个提出建议，只描绘新图片的场景：1.根据原图风格生成新的场景不同的图片2.丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物3.根据原图人物姿势生成相同姿势不同人物的图片，可以是真人或动漫人物（少推荐动物）4.换成新的绘画风格，如油画、水彩、国画、复古、某个画家的风格、科幻等。不要涉及对比度、深度这种词汇"
 # EDIT_TOPIC_1 = "Answer format example:[theme here, don't use brackets[]]. You are a creative artist. Determine the most likely intention of the user in editing the painting. From the following 5 options, select 1 to offer image modification suggestions and DESCRIBE THE NEW IMAGE SCENE: considering the addition, removal, or modification of background objects; style changes; generating new images based on the original style; creating new images based on the posture of the person in the original; if the original image is indoors or features buildings, produce a detailed design drawing. Exclude suggestions on contrast and depth. Offer one editing theme within a 20-WORD LIMIT, following the user's instruction, but enhance with supplementary details."
-EDIT_TOPIC_2 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，请分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这5个方向中选择1个提出建议，只描绘新图片的场景：原图是人像，则换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、印象派；增减、更换原图中的人物/动物/物体/背景；根据原图风格生成新的场景不同的图片；根据原图人物姿势生成相同姿势不同人物/动物的图片；如果原图是建筑物或室内，生成精致的装饰设计图。不要涉及对比度、深度这种词汇。"
+EDIT_TOPIC_2_0 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这4个方向中选择1个提出建议，只描绘新图片的场景：1.根据原图风格生成新的场景不同的图片2.丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物3.根据原图人物姿势生成相同姿势不同人物的图片，可以是真人或动漫人物（少推荐动物）4.换成新的绘画风格，如油画、水彩、国画、复古、某个画家的风格、科幻等。不要涉及对比度、深度这种词汇"
 # EDIT_TOPIC_2 = "Answer format example:1.[theme 1 here, don't use brackets[]]\n2.[theme 2 here, don't use brackets[]]. You are a creative artist. Determine the most likely intention of the user in editing the painting. From the following 5 options, each theme select 1 to offer image modification suggestions and DESCRIBE THE NEW IMAGE SCENE: considering the addition, removal, or modification of background objects; style changes; generating new images based on the original style; creating new images based on the posture of the person in the original; if the original image is indoors or features buildings, produce a detailed design drawing. Exclude suggestions on contrast and depth. Provide 2 editing themes, each theme within a 20-WORD LIMIT, adhering to the user's directive, but enriching with additional information."
+EDIT_TOPIC_1_1 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这4个方向中选择1个提出建议，只描绘新图片的场景：1.换成新的绘画风格，如动漫、科幻、油画、水彩、国画、复古、某个画家的风格等2.丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物3.根据原图人物姿势生成相同姿势不同人物的图片，可以是动漫人物或真人（少推荐动物）4.根据原图风格生成新的场景不同的图片。不要涉及对比度、深度这种词汇"
+EDIT_TOPIC_2_1 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这5个方向中选择1个提出建议，只描绘新图片的场景：1.换成新的绘画风格，如动漫、科幻、油画、水彩、国画、复古、某个画家的风格等2.丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物3.根据原图人物姿势生成相同姿势不同人物的图片，可以是动漫人物或真人（少推荐动物）4.根据原图风格生成新的场景不同的图片。不要涉及对比度、深度这种词汇"
+
+EDIT_TOPIC_1_2 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这3个方向中选择1个提出建议，只描绘新图片的场景：1.换成新的绘画风格，如油画、水彩、科幻、卡通、国画、复古、某个画家的风格等2.丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物3.根据原图风格生成新的场景不同的图片。不要涉及对比度、深度这种词汇"
+EDIT_TOPIC_2_2 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这3个方向中选择1个提出建议，只描绘新图片的场景：1.换成新的绘画风格，如油画、水彩、科幻、卡通、国画、复古、某个画家的风格等2.丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物3.根据原图风格生成新的场景不同的图片。不要涉及对比度、深度这种词汇"
+
+EDIT_TOPIC_1_3 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这4个方向中选择1个提出建议，只描绘新图片的场景：1.换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、某个画家的风格等2.丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物3.根据原图风格生成新的场景不同的图片4.根据原图动物姿势生成相同姿势不同人物或动物的图片。不要涉及对比度、深度这种词汇"
+EDIT_TOPIC_2_3 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这4个方向中选择1个提出建议，只描绘新图片的场景：1.换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、某个画家的风格等2.丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物3.根据原图风格生成新的场景不同的图片4.根据原图动物姿势生成相同姿势不同人物或动物的图片。不要涉及对比度、深度这种词汇"
+
+EDIT_TOPIC_1_4 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这4个方向中选择1个提出建议，只描绘新图片的场景：1.生成精致的装饰设计或建筑设计图2.换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、某个画家的风格等3.增减、更换原图中的背景/物体/人物/动物4.根据原图风格生成新的场景不同的图片。不要涉及对比度、深度这种词汇"
+EDIT_TOPIC_2_4 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这4个方向中选择1个提出建议，只描绘新图片的场景：1.生成精致的装饰设计或建筑设计图2.换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、某个画家的风格等3.增减、更换原图中的背景/物体/人物/动物4.根据原图风格生成新的场景不同的图片。不要涉及对比度、深度这种词汇"
+
+EDIT_TOPIC_1_6 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这5个方向中选择1个提出建议，只描绘新图片的场景：换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、印象派等；丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物；根据原图风格生成新的场景不同的图片；根据原图人物姿势生成相同姿势不同人物或动物的图片；如果原图是建筑物或室内，生成精致的装饰设计图。不要涉及对比度、深度这种词汇"
+EDIT_TOPIC_2_6 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这5个方向中选择1个提出建议，只描绘新图片的场景：原图是人像，则换成新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、印象派；丰富/更换原图中的背景，增减、更换原图中的物体/人物/动物；根据原图风格生成新的场景不同的图片；根据原图人物姿势生成相同姿势不同人物/动物的图片；如果原图是建筑物或室内，生成精致的装饰设计图。不要涉及对比度、深度这种词汇"
+
+EDIT_TOPIC_1_5 = "回答格式：直接写修改建议。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐1个修改主题，不超过20字。从这3个方向中选择1个提出建议，只描绘新图片的场景：1.丰富原图的背景2.新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、某个画家的风格等3.根据原图人物/动物姿势生成相同姿势不同人物/动物的图片。不要涉及对比度、深度这种词汇"
+EDIT_TOPIC_2_5 = "回答格式：1.修改建议1。\n2.修改建议2。你是一个想象力丰富的艺术家，给你用户所处的情境，分析出用户最有可能的修改图片意图，推荐2个修改主题，每个主题不超过20字。每次从这3个方向中选择1个提出建议，只描绘新图片的场景：1.丰富原图的背景2.新的绘画风格，如卡通、科幻、油画、水彩、国画、复古、某个画家的风格等3.根据原图人物/动物姿势生成相同姿势不同人物/动物的图片。不要涉及对比度、深度这种词汇"
+
 TOPIC_INTRO = "根据您的绘画指令和所处的情境，我向您推荐三个绘画主题。请选择其中一个主题开始您的创作。如果您有更好的绘画建议，请提出。\n\n"
 # TOPIC_INTRO = "Based on your painting instruction and context, I recommend the following 3 painting themes. Please CHOOSE ONE to proceed with your creation. If you have a better suggestion, please share it.\n\n"
 EDIT_INTRO = "根据您上传的图片和您所处的情境，我向您推荐三个修改图片的主题。请选择其中一个主题，对图片进行修改。如果您有更好的修改建议，请提出。\n\n"
@@ -54,10 +74,11 @@ Scenario 7 (Facial Expression Mode): The User command is often related to Facial
 Scenario 8 (Weather Mode): The User command is often related to Weather, vector=[0,0,0,1,0]."""
 EDIT_TOOLS = """Choose the most appropriate image modification tool based on previous discussion and JUST OUTPUT THE NUMBER (1-5):
 1. Shuffle: APPLY the STYLE of the input image to a new image.
-2. Softedge_hed: CHANGE the artistic STYLE of the image without adding or removing objects from the image.
-3. Depth: Add or remove objects in the image.
+2. Softedge_hed: Generate new images without adding or replacing objects/background from the image. For example, transitioning from day to night, or from spring to summer; also involve CHANGING the artistic STYLE, include cartoon, science fiction, oil painting, watercolor, traditional Chinese painting, retro, impressionism, and so on.
+3. Depth: Replace objects in the image.
 4. Openpose: Create a new image with the SAME POSE as the person in the original image.
-5. Mlsd: Generate ARCHITECTURAL or INTERIOR DESIGN drawings based on the original image."""
+5. Mlsd: Generate ARCHITECTURAL or INTERIOR DESIGN drawings based on the original image.
+6. Canny: Add/Replace/Enrich background to the picture. Add objects."""
 
 # uvicorn utils:app --reload
 # uvicorn utils:app --reload --port 22231 --host 0.0.0.0 --timeout-keep-alive 600 --ws-ping-timeout 600  默认是8000端口，可以改成别的，设置超时为10分钟
@@ -163,7 +184,7 @@ def gpt4_sd_draw(data: ImageRequest):
         write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."), construct_assistant("My apologies, I will amend the description and generate a new image."))
     data.cnt = data.cnt + 1
 
-    response = call_visualglm_api(np.array(new_image))["result"]
+    response = call_visualglm_api(np.array(new_image))[0]["result"]
     # response = turbo_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
 
     data.history.append(construct_assistant(f"本张图片的 ImageID 是 {imageID}。\n\n{response}"))
@@ -187,25 +208,64 @@ def gpt4_image_edit_topic(para: ImageTopic = Depends()):
     img = np.array(image)
     imageID = save_userID_image(data["userID"], image)
 
-    # image_description = turbo_api(TRANSLATE, [construct_user(call_visualglm_api(img)["result"])])
-    image_description = call_visualglm_api(img)["result"]
-
-    res = gpt4_api(MODE_DECIDE, [construct_user(data["input"])])  # 输出01向量
+    res = gpt4_api(MODE_DECIDE, [construct_user(data["input"])])  # 根据情境信息输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
-    print(res_vec)
-    res1 = filter_context(data["input"], res_vec)  # 输出有用的模态信息
-    res2 = gpt4_api(EDIT_TOPIC_2, [construct_user(f"{res1},image:[{image_description}]")])  # 输出2个推荐主题
-  
+    print(f"stanVec: {res_vec}")
+    res1 = filter_context(data["input"], res_vec).replace("User command:[]", "")  # 输出有用的模态信息
+    print(res1)
+
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
-    res_random1 = filter_context(data["input"], vec_random)
-    res_random2 = gpt4_api(EDIT_TOPIC_1, [construct_user(f"{res_random1},image:[{image_description}]")])
+    print(f"ranVec: {vec_random}")
+    res_random1 = filter_context(data["input"], vec_random).replace("User command:[]", "")
+    print(res_random1)
+
+    # image_description = turbo_api(TRANSLATE, [construct_user(call_visualglm_api(img)["result"])])
+    ressss1, ressss2 = call_visualglm_api(img, 2)
+    # ressss1, ressss2, ressss3 = call_visualglm_api(img, 2)
+    image_description = ressss1["result"]
+    print(ressss1["result"])
+    print(ressss2["result"])
+    # print(ressss3["result"])
+    if_anime = gpt4_api("画面以虚拟角色为主体，回复0；以人为主体（非虚拟角色），回复1；为风景画，回复2；以动物为主体（不是人或虚拟角色），回复3；画中为建筑物或室内，回复4", [construct_user(ressss2["result"])])
+    # if_anime = gpt4_api("一、画面为以人或动物为主体的线稿，回复5。二、画面不为以人或动物为主体的线稿，则分以下几种情况：画面以虚拟角色为主体，回复0；以人为主体（非虚拟角色），回复1；为风景画，回复2；以动物为主体（不是人或虚拟角色），回复3；画中为建筑物或室内，回复4", [construct_user(ressss2["result"]), construct_user(ressss3["result"])])
+    print(if_anime)
+    match = re.search(r'([0-4])', if_anime)
+    # match = re.search(r'([0-5])', if_anime)
+    if match:
+        if_anime = match.group(1)
+    else:
+        if_anime = '6'  # 设置默认值为 '6'
+    
+    switch = {  # 两个推荐主题
+        '0': lambda: gpt4_api(EDIT_TOPIC_2_0, [construct_user(f"{res1},image:[{image_description}]")]),
+        '1': lambda: gpt4_api(EDIT_TOPIC_2_1, [construct_user(f"{res1},image:[{image_description}]")]),
+        '2': lambda: gpt4_api(EDIT_TOPIC_2_2, [construct_user(f"{res1},image:[{image_description}]")]),
+        '3': lambda: gpt4_api(EDIT_TOPIC_2_3, [construct_user(f"{res1},image:[{image_description}]")]),
+        '4': lambda: gpt4_api(EDIT_TOPIC_2_4, [construct_user(f"{res1},image:[{image_description}]")]),
+        # '5': lambda: gpt4_api(EDIT_TOPIC_2_5, [construct_user(f"{res1},image:[{image_description}]")]),
+        '6': lambda: gpt4_api(EDIT_TOPIC_2_6, [construct_user(f"{res1},image:[{image_description}]")]),
+    }
+    func = switch.get(if_anime)
+    res2 = func()
+
+    switch = {  # 两个推荐主题
+        '0': lambda: gpt4_api(EDIT_TOPIC_1_0, [construct_user(f"{res_random1},image:[{image_description}]")]),
+        '1': lambda: gpt4_api(EDIT_TOPIC_1_1, [construct_user(f"{res_random1},image:[{image_description}]")]),
+        '2': lambda: gpt4_api(EDIT_TOPIC_1_2, [construct_user(f"{res_random1},image:[{image_description}]")]),
+        '3': lambda: gpt4_api(EDIT_TOPIC_1_3, [construct_user(f"{res_random1},image:[{image_description}]")]),
+        '4': lambda: gpt4_api(EDIT_TOPIC_1_4, [construct_user(f"{res_random1},image:[{image_description}]")]),
+        # '5': lambda: gpt4_api(EDIT_TOPIC_1_5, [construct_user(f"{res_random1},image:[{image_description}]")]),
+        '6': lambda: gpt4_api(EDIT_TOPIC_1_6, [construct_user(f"{res_random1},image:[{image_description}]")])
+    }
+    func = switch.get(if_anime)
+    res_random2 = func()
+
     # topic_output = construct_assistant("Received.\nYour userID is " + data["userID"] + f", imageID is {imageID}.\n\n" + image_description + "\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     topic_output = construct_assistant("收到图片。\n您的 userID 是 " + data["userID"] + f"，本张图片的 imageID 是 {imageID}。\n\n" + image_description + "\n\n" + EDIT_INTRO + res2 + "\n3. " + res_random2)
     data['history'].append(topic_output)
     write_json(data["userID"], construct_user(data["input"]), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
-    
     print(data['history'])
-    return {"history": data['history'], "imageID": imageID}
+    return {"history": data['history'], "imageID": imageID, "stanVec": res_vec, "ranVec": vec_random}
     
 
 class ImageEditRequest(BaseModel):
@@ -223,15 +283,19 @@ def gpt4_sd_edit(data: ImageEditRequest):  # 根据讨论修改图片
     data.history = tmp_history
 
     toolID = gpt4_api(EDIT_TOOLS, data.history)
-    match = re.search(r'([1-5])', toolID)
-    toolID = match.group(1)
+    match = re.search(r'([1-6])', toolID)
+    if match:
+        toolID = match.group(1)
+    else:
+        toolID = '2'  # 设置默认值为 '2'
     print(f"toolID:{toolID}")
     switch = {
         '1': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "shuffle", "control_v11e_sd15_shuffle [526bfdae]"),  # 风格迁移
-        '2': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]"),  # 风格化
-        '3': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "depth_zoe", "control_v11f1p_sd15_depth [cfd03158]"),  # 增减物体
+        '2': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img"),  # 风格化
+        '3': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "depth_zoe", "control_v11f1p_sd15_depth [cfd03158]"),  # 替换物体
         '4': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "openpose_full", "control_v11p_sd15_openpose [cab727d4]"),  # 姿态控制
-        '5': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "mlsd", "control_v11p_sd15_mlsd [aca30ff0]")  # 建筑设计，适合建筑物和室内空间
+        '5': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "mlsd", "control_v11p_sd15_mlsd [aca30ff0]"),  # 建筑设计，适合建筑物和室内空间
+        '6': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "canny", "control_v11p_sd15_canny [d14c016b]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img")  # 添加/替换背景，添加物体
     }
     func = switch.get(toolID)
     if func:
@@ -247,7 +311,7 @@ def gpt4_sd_edit(data: ImageEditRequest):  # 根据讨论修改图片
     # 构造URL
     image_url = "http://166.111.139.116:22231/" + static_path
 
-    response = f"本张图片的 ImageID 是 {imageID}。\n\n" + call_visualglm_api(np.array(new_image))["result"]
+    response = f"本张图片的 ImageID 是 {imageID}。\n\n" + call_visualglm_api(np.array(new_image), 1)["result"]
     # response = f"ImageID is {imageID}.\n\n" + turbo_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
     data.history.append(construct_assistant(response))
     write_json(data.userID, construct_prompt(pos_prompt), construct_assistant(f"toolID:{toolID}"), construct_assistant(response))
@@ -261,6 +325,7 @@ def gpt4_mode_1(data: ChatbotData):
 
     res = gpt4_api(MODE_DECIDE, [context_output])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
+    print(f"stanVec: {res_vec}")
     vector_output = construct_vector(res)
     
     res1 = filter_context(data.input, res_vec)  # standard vector
@@ -279,13 +344,13 @@ def gpt4_mode_1(data: ChatbotData):
     write_json(data.userID, context_output, vector_output, construct_context(res1), construct_context(tmp), topic_output)
 
     print(data.history)
-    return {"history": data.history}
+    return {"history": data.history, "stanVec": res_vec}
 
 @app.post("/gpt4_mode_2")  # 第二次实验（如果Phone Content很长，给出主题会损失一定信息，这时候用户会说出自己需求来纠正它）
 def gpt4_mode_2(data: ChatbotData):
     res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
-    print(res_vec)
+    print(f"stanVec: {res_vec}")
 
     res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
     res2 = gpt4_api(TOPIC_RECOMMEND_2, [construct_user(res1)])  # 输出2个推荐主题
@@ -293,6 +358,7 @@ def gpt4_mode_2(data: ChatbotData):
 
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
     res_random1 = filter_context(data.input, vec_random)
+    print(f"ranVec: {vec_random}")
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
     topic_output = construct_assistant("您的 userID 是 " + data.userID + "。\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
     # topic_output = construct_assistant("Your userID is " + data.userID + ".\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
@@ -300,19 +366,20 @@ def gpt4_mode_2(data: ChatbotData):
     write_json(data.userID, construct_user(data.input), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
 
     print(data.history)
-    return {"history": data.history}
+    return {"history": data.history, "stanVec": res_vec, "ranVec": vec_random}
 
 @app.post("/gpt4_mode_3")  # 第三次实验
 def gpt4_mode_3(data: ChatbotData):
     res = gpt4_api(MODE_DECIDE, [construct_user(data.input)])  # 输出01向量
     res_vec = extract_lists(res)  # 正则表达式提取出列表
-    print(res_vec)
+    print(f"stanVec: {res_vec}")
 
     res1 = filter_context(data.input, res_vec)  # 输出有用的模态信息
     res2 = gpt4_api(TOPIC_RECOMMEND_2, [construct_user(res1)])  # 输出2个推荐主题
     print(res2)
 
     vec_random = flip_random_bit(res_vec)  # 随机一个模态reverse
+    print(f"ranVec: {vec_random}")
     res_random1 = filter_context(data.input, vec_random)
     res_random2 = gpt4_api(TOPIC_RECOMMEND_1, [construct_user(res_random1)])
     topic_output = construct_assistant("您的 userID 是 " + data.userID + "。\n\n" + TOPIC_INTRO + res2 + "\n3. " + res_random2)
@@ -321,7 +388,7 @@ def gpt4_mode_3(data: ChatbotData):
     write_json(data.userID, construct_user(data.input), construct_vector(str(res_vec)), construct_context(res1), construct_vector(str(vec_random)), construct_vector(str(res_random1)), topic_output)
 
     print(data.history)
-    return {"history": data.history}
+    return {"history": data.history, "stanVec": res_vec, "ranVec": vec_random}
 
 
 def construct_text(role, text):
@@ -448,7 +515,7 @@ def read_image(img, chatbot, history, userID):
     process_and_save_image(img, userID)
     chatbot.append((parse_text("Please provide suggestions for this image."), ""))
 
-    response0 = gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(img))["result"]])
+    response0 = gpt4_api(TRANSLATE, [construct_user(call_visualglm_api(img, 1)["result"])])
     response = gpt4_api(UPLOAD_ADVICE, [construct_user(response0)])
 
     chatbot[-1] = (parse_text("Please provide suggestions for this image."), parse_text(response)) 
@@ -493,9 +560,7 @@ def encode_pil_to_base64(image):
         bytes_data = output_bytes.getvalue()
     return base64.b64encode(bytes_data).decode("utf-8")
 
-def controlnet_txt2img_api(image_path, pos_prompt, userID, cn_module, cn_model, sampler="DPM++ 2M Karras"):
-    url = 'http://127.0.0.1:6016/sdapi/v1/txt2img'
-    # url = "https://gt29495501.yicp.fun/sdapi/v1/txt2img"
+def controlnet_txt2img_api(image_path, pos_prompt, userID, cn_module, cn_model, url='http://127.0.0.1:6016/sdapi/v1/txt2img', sampler="DPM++ SDE Karras"):
     controlnet_image = Image.open(image_path)
     width, height = controlnet_image.size
     controlnet_image_data = encode_pil_to_base64(controlnet_image)
@@ -571,9 +636,9 @@ def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height):
     return image_list, imageID
 
 
-def call_visualglm_api(img, history=[]):
+def call_visualglm_api(img, cnt, history=[]):  # 对visualglm加上“请提出绘画建议”的prompt，是没有用的
     history = []  # 先不给历史
-    prompt="详细描述这张图片，包括画中的人、景、物、构图、颜色等，不超过90字"
+    prompt="详细描述这张图片。包括画中的人、景、物、构图、颜色等，不超过90字"
     url = "http://127.0.0.1:8080"
 
     # 将BGR图像转换为RGB图像
@@ -585,6 +650,22 @@ def call_visualglm_api(img, history=[]):
         "text": prompt,
         "history": history
     }
-    response = requests.post(url, json=payload)
-    response = response.json()
-    return response
+    response = requests.post(url, json=payload).json()
+
+    if(cnt == 1):
+        return response
+    if(cnt == 2):
+        payload_real_anime = {
+            "image": img_base64,
+            "text": "这张图片是以人为主体的吗？如果是，这张图片是真人还是虚拟角色？",
+            "history": history
+        }
+        response_real_anime = requests.post(url, json=payload_real_anime).json()
+        # payload_canny = {
+        #     "image": img_base64,
+        #     "text": "这张图片是以人或动物为主体的线稿吗？",
+        #     "history": history
+        # }
+        # response_canny = requests.post(url, json=payload_canny).json()
+        # return response, response_real_anime, response_canny
+        return response, response_real_anime
