@@ -74,11 +74,12 @@ Scenario 7 (Facial Expression Mode): The User command is often related to Facial
 Scenario 8 (Weather Mode): The User command is often related to Weather, vector=[0,0,0,1,0]."""
 EDIT_TOOLS = """Choose the most appropriate image modification tool based on previous discussion and JUST OUTPUT THE NUMBER (1-5):
 1. Shuffle: APPLY the STYLE of the input image to a new image.
-2. Softedge_hed: Generate new images without adding or replacing objects/background from the image. For example, transitioning from day to night, or from spring to summer; also involve CHANGING the artistic STYLE, include cartoon, science fiction, oil painting, watercolor, traditional Chinese painting, retro, impressionism, and so on.
+2. Softedge_hed_real: Generate new images without adding or replacing objects/background from the image. For example, transitioning from day to night, or from spring to summer; also involve CHANGING the artistic STYLE, include science fiction, oil painting, watercolor, traditional Chinese painting, retro, impressionism, and so on.
 3. Depth: Replace objects in the image.
 4. Openpose: Create a new image with the SAME POSE as the person in the original image.
 5. Mlsd: Generate ARCHITECTURAL or INTERIOR DESIGN drawings based on the original image.
-6. Canny: Add/Replace/Enrich background to the picture. Add objects."""
+6. Canny: Add/Replace/Enrich background to the picture. Add objects.
+7. Softedge_hed_style: Change to anime style."""
 
 # uvicorn utils:app --reload
 # uvicorn utils:app --reload --port 22231 --host 0.0.0.0 --timeout-keep-alive 600 --ws-ping-timeout 600  默认是8000端口，可以改成别的，设置超时为10分钟
@@ -168,7 +169,18 @@ def gpt4_sd_draw(data: ImageRequest):
     neg_prompt = gpt4_api(TXT2IMG_NEG_PROMPT, data.history)
     print(f"neg_prompt: {neg_prompt}")
     data.history = tmp_history
-    new_images, imageID = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height)
+
+    if_anime = gpt4_api("如果要求动漫风格，返回1；否则返回0", data.history)
+    print(if_anime)
+    match = re.search(r'([0-1])', if_anime)
+    if match:
+        if_anime = match.group(1)
+    else:
+        if_anime = '0'  # 设置默认值为 '0'
+    if(if_anime == '1'):  # 动漫
+        new_images, imageID = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height, "https://gt29495501.yicp.fun")
+    else:
+        new_images, imageID = call_sd_t2i(data.userID, pos_prompt, neg_prompt, data.width, data.height)
     
     new_image = new_images[0]
     static_path = "static/images/" + str(uuid.uuid4()) + ".jpg"
@@ -184,7 +196,7 @@ def gpt4_sd_draw(data: ImageRequest):
         write_json(data.userID, construct_user("This image doesn't align with my vision, please revise the description."), construct_assistant("My apologies, I will amend the description and generate a new image."))
     data.cnt = data.cnt + 1
 
-    response = call_visualglm_api(np.array(new_image))[0]["result"]
+    response = call_visualglm_api(np.array(new_image), 1)["result"]
     # response = turbo_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
 
     data.history.append(construct_assistant(f"本张图片的 ImageID 是 {imageID}。\n\n{response}"))
@@ -283,7 +295,7 @@ def gpt4_sd_edit(data: ImageEditRequest):  # 根据讨论修改图片
     data.history = tmp_history
 
     toolID = gpt4_api(EDIT_TOOLS, data.history)
-    match = re.search(r'([1-6])', toolID)
+    match = re.search(r'([1-7])', toolID)
     if match:
         toolID = match.group(1)
     else:
@@ -291,11 +303,12 @@ def gpt4_sd_edit(data: ImageEditRequest):  # 根据讨论修改图片
     print(f"toolID:{toolID}")
     switch = {
         '1': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "shuffle", "control_v11e_sd15_shuffle [526bfdae]"),  # 风格迁移
-        '2': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img"),  # 风格化
+        '2': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]"),  # 风格化
         '3': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "depth_zoe", "control_v11f1p_sd15_depth [cfd03158]"),  # 替换物体
         '4': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "openpose_full", "control_v11p_sd15_openpose [cab727d4]"),  # 姿态控制
         '5': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "mlsd", "control_v11p_sd15_mlsd [aca30ff0]"),  # 建筑设计，适合建筑物和室内空间
-        '6': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "canny", "control_v11p_sd15_canny [d14c016b]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img")  # 添加/替换背景，添加物体
+        '6': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "canny", "control_v11p_sd15_canny [d14c016b]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img"),  # 添加/替换背景，添加物体
+        '7': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img"),  # 动漫风格
     }
     func = switch.get(toolID)
     if func:
@@ -605,9 +618,7 @@ def controlnet_txt2img_api(image_path, pos_prompt, userID, cn_module, cn_model, 
     return image_list, imageID
 
 
-def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height):
-    url = "http://127.0.0.1:6016"
-    # url = "https://gt29495501.yicp.fun"
+def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height, url="http://127.0.0.1:6016"):
     payload = {
         "enable_hr": True,  # True画质更好但更慢
         # "enable_hr": False,  # True画质更好但更慢
