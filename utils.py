@@ -133,6 +133,31 @@ def save_userID_image(user_id, img):
     img.save(os.path.join(path, new_image_name))
     return str(len(existing_images) + 1)
 
+def compute_white_ratio(image_path, threshold=230, max_side=200):
+    """计算图片中白色像素的比例，先对图片进行等比压缩处理。大于0.8就是简笔画"""
+    with Image.open(image_path) as controlnet_image:
+        # 计算等比缩放的大小
+        width, height = controlnet_image.size
+        if width > height:
+            new_width = max_side
+            new_height = int((max_side / width) * height)
+        else:
+            new_height = max_side
+            new_width = int((max_side / height) * width)
+    
+        # 压缩图像
+        controlnet_image = controlnet_image.resize((new_width, new_height), Image.ANTIALIAS)
+        
+        # 计算白色像素的比例
+        np_img = np.array(controlnet_image)
+        white_pixels = np.sum(np.all(np_img[:, :, :3] > threshold, axis=-1))
+        total_pixels = new_width * new_height
+        if (white_pixels / total_pixels) > 0.8:
+            return True
+        else:
+            return False
+
+
 class ChatbotData(BaseModel):
     input: str
     history: List[Dict[str, str]]
@@ -143,7 +168,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # 可以通过 URL /static/image.jpg 来访问文件
 @app.post("/gpt4_predict")  # 只有data.history满足gpt-4的api格式，不能污染它
 def gpt4_predict(data: ChatbotData):
-    print(f"before:{data.history}")
     res = gpt4_api(ART_ADVICE, data.history)
     assistant_output = construct_assistant(res)
     data.history.append(assistant_output)
@@ -164,6 +188,7 @@ def gpt4_sd_draw(data: ImageRequest):
     tmp_history = data.history
     if len(data.history) > 0:  # 去掉绘画指令那一句
         data.history.pop()
+    print(f"draw_prompt:{data.history}")
     pos_prompt = gpt4_api(TXT2IMG_PROMPT, data.history)
     print(f"pos_prompt: {pos_prompt}")
     neg_prompt = gpt4_api(TXT2IMG_NEG_PROMPT, data.history)
@@ -279,6 +304,13 @@ def gpt4_image_edit_topic(para: ImageTopic = Depends()):
     print(data['history'])
     return {"history": data['history'], "imageID": imageID, "stanVec": res_vec, "ranVec": vec_random}
     
+@app.post("/save_sketch")
+def save_sketch(para: ImageTopic = Depends()):
+    data = json.loads(para.data)
+    image_bytes = para.image.file.read()
+    image = Image.open(io.BytesIO(image_bytes))
+    imageID = save_userID_image(data["userID"], image)
+    return {"imageID": imageID}
 
 class ImageEditRequest(BaseModel):
     history: List[Dict[str, str]]
@@ -290,31 +322,38 @@ def gpt4_sd_edit(data: ImageEditRequest):  # 根据讨论修改图片
     tmp_history = data.history
     if len(data.history) > 0:  # 去掉绘画指令那一句
         data.history.pop()
+    print(f"edit_prompt:{data.history}")
     pos_prompt = gpt4_api(CN_TXT2IMG_PROMPT, data.history)
     print(f"pos_prompt: {pos_prompt}")
     data.history = tmp_history
 
-    toolID = gpt4_api(EDIT_TOOLS, data.history)
-    match = re.search(r'([1-7])', toolID)
-    if match:
-        toolID = match.group(1)
+    if(compute_white_ratio(f"output/{data.userID}/{data.editID}.jpg")):  # 是简笔画
+        print("img2img!")
+        # new_images, imageID = controlnet_img2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "canny", "control_v11p_sd15_canny [d14c016b]", "https://gt29495501.yicp.fun/sdapi/v1/img2img")
+        new_images, imageID = controlnet_img2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "scribble_hed", "control_v11p_sd15_scribble [d4ba51ff]", "https://gt29495501.yicp.fun/sdapi/v1/img2img")
     else:
-        toolID = '2'  # 设置默认值为 '2'
-    print(f"toolID:{toolID}")
-    switch = {
-        '1': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "shuffle", "control_v11e_sd15_shuffle [526bfdae]"),  # 风格迁移
-        '2': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]"),  # 风格化
-        '3': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "depth_zoe", "control_v11f1p_sd15_depth [cfd03158]"),  # 替换物体
-        '4': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "openpose_full", "control_v11p_sd15_openpose [cab727d4]"),  # 姿态控制
-        '5': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "mlsd", "control_v11p_sd15_mlsd [aca30ff0]"),  # 建筑设计，适合建筑物和室内空间
-        '6': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "canny", "control_v11p_sd15_canny [d14c016b]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img"),  # 添加/替换背景，添加物体
-        '7': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img"),  # 动漫风格
-    }
-    func = switch.get(toolID)
-    if func:
-        new_images, imageID = func()
-    else:
-        print('无效的toolID')
+        toolID = gpt4_api(EDIT_TOOLS, data.history)
+        match = re.search(r'([1-7])', toolID)
+        if match:
+            toolID = match.group(1)
+        else:
+            toolID = '2'  # 设置默认值为 '2'
+        print(f"toolID:{toolID}")
+        switch = {
+            '1': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "shuffle", "control_v11e_sd15_shuffle [526bfdae]"),  # 风格迁移
+            '2': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]"),  # 风格化
+            '3': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "depth_zoe", "control_v11f1p_sd15_depth [cfd03158]"),  # 替换物体
+            '4': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "openpose_full", "control_v11p_sd15_openpose [cab727d4]"),  # 姿态控制
+            '5': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "mlsd", "control_v11p_sd15_mlsd [aca30ff0]"),  # 建筑设计，适合建筑物和室内空间
+            '6': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "canny", "control_v11p_sd15_canny [d14c016b]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img"),  # 添加/替换背景，添加物体
+            '7': lambda: controlnet_txt2img_api(f"output/{data.userID}/{data.editID}.jpg", pos_prompt, data.userID, "softedge_hed", "control_v11p_sd15_lineart [43d4be0d]", "https://gt29495501.yicp.fun/sdapi/v1/txt2img"),  # 动漫风格
+        }
+        func = switch.get(toolID)
+        if func:
+            new_images, imageID = func()
+        else:
+            print('无效的toolID')
+        write_json(data.userID, construct_assistant(f"toolID:{toolID}"))
 
     new_image = new_images[0]
     static_path = "static/images/" + str(uuid.uuid4()) + ".jpg"
@@ -327,7 +366,7 @@ def gpt4_sd_edit(data: ImageEditRequest):  # 根据讨论修改图片
     response = f"本张图片的 ImageID 是 {imageID}。\n\n" + call_visualglm_api(np.array(new_image), 1)["result"]
     # response = f"ImageID is {imageID}.\n\n" + turbo_api(TRANSLATE, [construct_user(call_visualglm_api(np.array(new_image))["result"])])
     data.history.append(construct_assistant(response))
-    write_json(data.userID, construct_prompt(pos_prompt), construct_assistant(f"toolID:{toolID}"), construct_assistant(response))
+    write_json(data.userID, construct_prompt(pos_prompt), construct_assistant(response))
     print(data.history)
     return {"history": data.history, "image_url": image_url, "imageID": imageID}
 
@@ -618,6 +657,51 @@ def controlnet_txt2img_api(image_path, pos_prompt, userID, cn_module, cn_model, 
     return image_list, imageID
 
 
+def controlnet_img2img_api(image_path, pos_prompt, userID, cn_module, cn_model, url='http://127.0.0.1:6016/sdapi/v1/img2img', sampler="DPM++ SDE Karras"):
+    controlnet_image = Image.open(image_path)
+    width, height = controlnet_image.size
+    controlnet_image_data = encode_pil_to_base64(controlnet_image)
+    img2img_data = {
+        "init_images": [controlnet_image_data],
+        "prompt": "((masterpiece, best quality, ultra-detailed, illustration))" + pos_prompt,
+        "negative_prompt": "nsfw, (EasyNegative:0.8), (badhandv4:0.8), (missing fingers, multiple legs), (worst quality, low quality, extra digits, loli, loli face:1.2), lowres, blurry, text, logo, artist name, watermark",
+        "batch_size": 1,
+        "steps": 32,
+        "cfg_scale": 7,
+        "width": width,
+        "height": height,
+        "sampler_name": sampler,
+        "enabled": True,
+        "alwayson_scripts": {
+            "controlnet": {
+                "args": [
+                    {
+                        "weight": 0.7,
+                        "guidance start": 0.2,
+                        "guidance end": 0.8,
+                        "input_image": controlnet_image_data,
+                        "module": cn_module,
+                        "model": cn_model,
+                        "pixel_perfect": True
+                    }
+                ]
+            }
+        }
+    }
+    response = requests.post(url, json=img2img_data)
+    print(img2img_data["width"])
+    print(img2img_data["height"])
+    r = response.json()
+    image_list = []
+    for i in r['images']:
+        image = Image.open(io.BytesIO(base64.b64decode(i.split(",",1)[0])))
+        image_list.append(image)
+        imageID = save_userID_image(userID, image)
+        write_json(userID, construct_photo(f"output/{userID}/{imageID}.jpg"))
+
+    return image_list, imageID
+
+
 def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height, url="http://127.0.0.1:6016"):
     payload = {
         "enable_hr": True,  # True画质更好但更慢
@@ -647,8 +731,7 @@ def call_sd_t2i(userID, pos_prompt, neg_prompt, width, height, url="http://127.0
     return image_list, imageID
 
 
-def call_visualglm_api(img, cnt, history=[]):  # 对visualglm加上“请提出绘画建议”的prompt，是没有用的
-    history = []  # 先不给历史
+def call_visualglm_api(img, cnt):  # 对visualglm加上“请提出绘画建议、是否是线稿”的prompt，是没有用的
     prompt="详细描述这张图片。包括画中的人、景、物、构图、颜色等，不超过90字"
     url = "http://127.0.0.1:8080"
 
@@ -659,7 +742,7 @@ def call_visualglm_api(img, cnt, history=[]):  # 对visualglm加上“请提出�
     payload = {
         "image": img_base64,
         "text": prompt,
-        "history": history
+        "history": []
     }
     response = requests.post(url, json=payload).json()
 
@@ -669,14 +752,7 @@ def call_visualglm_api(img, cnt, history=[]):  # 对visualglm加上“请提出�
         payload_real_anime = {
             "image": img_base64,
             "text": "这张图片是以人为主体的吗？如果是，这张图片是真人还是虚拟角色？",
-            "history": history
+            "history": []
         }
         response_real_anime = requests.post(url, json=payload_real_anime).json()
-        # payload_canny = {
-        #     "image": img_base64,
-        #     "text": "这张图片是以人或动物为主体的线稿吗？",
-        #     "history": history
-        # }
-        # response_canny = requests.post(url, json=payload_canny).json()
-        # return response, response_real_anime, response_canny
         return response, response_real_anime
